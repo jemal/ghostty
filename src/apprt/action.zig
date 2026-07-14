@@ -347,6 +347,12 @@ pub const Action = union(Key) {
     /// otherwise the terminal-set title.
     copy_title_to_clipboard,
 
+    /// Move the target split, swapping it with its nearest neighboring
+    /// split in the given direction. Moving is confined to the split
+    /// tree the target belongs to (i.e. splits cannot be moved across
+    /// tabs or windows this way).
+    move_split: MoveSplit,
+
     /// Sync with: ghostty_action_tag_e
     pub const Key = enum(c_int) {
         quit,
@@ -415,6 +421,7 @@ pub const Action = union(Key) {
         search_selected,
         readonly,
         copy_title_to_clipboard,
+        move_split,
 
         test "ghostty.h Action.Key" {
             try lib.checkGhosttyHEnum(Key, "GHOSTTY_ACTION_");
@@ -519,6 +526,19 @@ pub const GotoSplit = enum(c_int) {
 
     test "ghostty.h GotoSplit" {
         try lib.checkGhosttyHEnum(GotoSplit, "GHOSTTY_GOTO_SPLIT_");
+    }
+};
+
+// This is made extern (c_int) to make interop easier with our embedded
+// runtime. The small size cost doesn't make a difference in our union.
+pub const MoveSplit = enum(c_int) {
+    up,
+    down,
+    left,
+    right,
+
+    test "ghostty.h MoveSplit" {
+        try lib.checkGhosttyHEnum(MoveSplit, "GHOSTTY_MOVE_SPLIT_");
     }
 };
 

@@ -633,6 +633,12 @@ pub const Action = union(enum) {
     /// (`previous` and `next`).
     goto_split: SplitFocusDirection,
 
+    /// Move the current split in the specified direction (`right`, `down`,
+    /// `left` or `up`), swapping it with the neighboring split in that
+    /// direction, if one exists. Moving is confined to the current tab;
+    /// splits cannot be moved across tabs or windows this way.
+    move_split: SplitMoveDirection,
+
     /// Focus on either the previous window or the next one ('previous', 'next')
     goto_window: GotoWindow,
 
@@ -1081,6 +1087,42 @@ pub const Action = union(enum) {
         }
     };
 
+    pub const SplitMoveDirection = enum {
+        up,
+        left,
+        down,
+        right,
+
+        pub fn parse(input: []const u8) !SplitMoveDirection {
+            return std.meta.stringToEnum(SplitMoveDirection, input) orelse {
+                // For consistency with goto_split, map "top" and "bottom"
+                // onto the enum values "up" and "down"
+                if (std.mem.eql(u8, input, "top")) {
+                    return .up;
+                } else if (std.mem.eql(u8, input, "bottom")) {
+                    return .down;
+                } else {
+                    return Error.InvalidFormat;
+                }
+            };
+        }
+
+        test "parse" {
+            const testing = std.testing;
+
+            try testing.expectEqual(.up, try SplitMoveDirection.parse("up"));
+            try testing.expectEqual(.left, try SplitMoveDirection.parse("left"));
+            try testing.expectEqual(.down, try SplitMoveDirection.parse("down"));
+            try testing.expectEqual(.right, try SplitMoveDirection.parse("right"));
+
+            try testing.expectEqual(.up, try SplitMoveDirection.parse("top"));
+            try testing.expectEqual(.down, try SplitMoveDirection.parse("bottom"));
+
+            try testing.expectError(error.InvalidFormat, SplitMoveDirection.parse(""));
+            try testing.expectError(error.InvalidFormat, SplitMoveDirection.parse("green"));
+        }
+    };
+
     pub const SplitResizeDirection = enum {
         up,
         down,
@@ -1421,6 +1463,7 @@ pub const Action = union(enum) {
             .toggle_tab_overview,
             .new_split,
             .goto_split,
+            .move_split,
             .goto_window,
             .toggle_split_zoom,
             .toggle_readonly,
