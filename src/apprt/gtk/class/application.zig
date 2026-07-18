@@ -184,11 +184,6 @@ pub const Application = extern struct {
         /// window.
         requested_window: bool = false,
 
-        /// Set to true once we've handled the first activation of the
-        /// primary instance. Used to restore a saved session exactly once
-        /// (on the first launch) rather than on every activation.
-        did_first_activate: bool = false,
-
         /// This is set to false internally when the event loop
         /// should exit and the application should quit. This must
         /// only be set by the main loop thread.
@@ -685,6 +680,23 @@ pub const Application = extern struct {
 
         // Trigger our runloop exit.
         self.private().running = false;
+    }
+
+    /// Returns true if any regular (non-quick-terminal) window is currently
+    /// open. The quick terminal registers with GtkApplication like any other
+    /// window, so it alone doesn't count.
+    fn hasRegularWindow(self: *Self) bool {
+        _ = self;
+        const glist = gtk.Window.listToplevels();
+        defer glist.free();
+        var current_: ?*glib.List = glist;
+        while (current_) |node| : (current_ = node.f_next) {
+            const data = node.f_data orelse continue;
+            const gtk_window: *gtk.Window = @ptrCast(@alignCast(data));
+            const window = gobject.ext.cast(Window, gtk_window) orelse continue;
+            if (!window.isQuickTerminal()) return true;
+        }
+        return false;
     }
 
     /// Persist the current set of windows, their tabs, and each tab's working
@@ -1868,13 +1880,23 @@ pub const Application = extern struct {
 
         const priv = self.private();
 
-        // On the very first activation of the primary instance, attempt to
-        // restore a previously saved session instead of opening a single
-        // empty window. If we restore at least one window, we skip the
-        // default new_window so we don't end up with an extra empty window.
+        // If no regular (non-quick-terminal) window is currently open,
+        // attempt to restore a previously saved session instead of opening a
+        // single empty window. If we restore at least one window, we skip
+        // the default new_window so we don't end up with an extra empty
+        // window.
+        //
+        // We check "no regular window open" rather than "first activation
+        // ever" because the quick terminal keeps the process alive after all
+        // regular windows are closed: closing the last regular window saves
+        // the session but doesn't quit, so a later activation (e.g.
+        // relaunching from a desktop launcher) reactivates this same
+        // process. If we only restored on the very first activation, that
+        // later activation would open a blank window instead, and that
+        // blank window's own state would then overwrite the still-good
+        // saved session on its first save.
         const restored = restore: {
-            if (priv.did_first_activate) break :restore false;
-            priv.did_first_activate = true;
+            if (self.hasRegularWindow()) break :restore false;
             break :restore self.tryRestoreSession();
         };
 
