@@ -1006,7 +1006,24 @@ pub const Application = extern struct {
 
                 if (tab_data.zoomed) |p| built.zoom(session.resolvePath(&built, p));
 
-                tab.getSplitTree().setTree(&built);
+                const split_tree = tab.getSplitTree();
+                split_tree.setTree(&built);
+
+                // `buildTree` grafts the tree directly via `Surface.Tree.split`
+                // rather than going through `SplitTree.newSplit`, so the
+                // "is-split" binding that `newSplit` normally sets up per-surface
+                // (which drives unfocused-split-opacity dimming) never happens
+                // for restored surfaces. Bind it here so restored splits dim
+                // like interactively-created ones.
+                var it = built.iterator();
+                while (it.next()) |entry| {
+                    _ = split_tree.as(gobject.Object).bindProperty(
+                        "is-split",
+                        entry.view.as(gobject.Object),
+                        "is-split",
+                        .{ .sync_create = true },
+                    );
+                }
 
                 // Focus the surface that was active when the session was
                 // saved. `built`'s view pointers are shared with the clone
