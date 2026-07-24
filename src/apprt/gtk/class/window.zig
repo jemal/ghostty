@@ -27,6 +27,7 @@ const CloseConfirmationDialog = @import("close_confirmation_dialog.zig").CloseCo
 const SplitTree = @import("split_tree.zig").SplitTree;
 const Surface = @import("surface.zig").Surface;
 const Tab = @import("tab.zig").Tab;
+const TabSidebar = @import("tab_sidebar.zig").TabSidebar;
 const DebugWarning = @import("debug_warning.zig").DebugWarning;
 const CommandPalette = @import("command_palette.zig").CommandPalette;
 const WeakRef = @import("../weak_ref.zig").WeakRef;
@@ -270,6 +271,20 @@ pub const Window = extern struct {
         tab_view: *adw.TabView,
         toolbar: *adw.ToolbarView,
         toast_overlay: *adw.ToastOverlay,
+        split_view: *gtk.Paned,
+        tab_sidebar: *TabSidebar,
+
+        /// Whether the tab sidebar is currently a visible child of
+        /// `split_view`. Used to avoid resetting the divider position
+        /// (and thus the user's manual resize) on every `syncAppearance`
+        /// call; we only set an initial position the moment the sidebar
+        /// transitions from hidden to shown.
+        sidebar_shown: bool = false,
+
+        /// A temporary user override (via the `toggle_tab_sidebar` action)
+        /// that hides the sidebar regardless of what config would
+        /// otherwise show. Toggled by `toggleTabSidebar`.
+        sidebar_user_hidden: bool = false,
 
         pub var offset: c_int = 0;
     };
@@ -310,6 +325,14 @@ pub const Window = extern struct {
         // If our configuration is null then we get the configuration
         // from the application.
         const priv = self.private();
+
+        // We freely move the tab sidebar and tab overview between the
+        // start/end children of `split_view` (and out of it entirely) as
+        // the tab bar location changes. Take an extra permanent reference
+        // on both so removing one from the paned never destroys it; we
+        // drop these in dispose().
+        _ = priv.tab_sidebar.ref();
+        priv.tab_overview.ref();
 
         // Assign a stable random id to every window at creation. `new()` may
         // override it (with a restored id) for session restore.
@@ -635,6 +658,17 @@ pub const Window = extern struct {
         tab_overview.setOpen(@intFromBool(!is_open));
     }
 
+    /// Toggle a temporary user override that hides/shows the vertical tab
+    /// sidebar, independent of the `gtk-tabs-location`/`window-show-tab-bar`
+    /// config. Only has a visible effect when the tab bar location is
+    /// `left`/`right`; otherwise the sidebar is already hidden and this is
+    /// a no-op until the location changes.
+    pub fn toggleTabSidebar(self: *Self) void {
+        const priv = self.private();
+        priv.sidebar_user_hidden = !priv.sidebar_user_hidden;
+        self.syncAppearance();
+    }
+
     /// Toggle the visible property.
     pub fn toggleVisibility(self: *Self) void {
         const widget = self.as(gtk.Widget);
@@ -720,17 +754,101 @@ pub const Window = extern struct {
                 config.@"window-theme" == .ghostty,
         );
 
-        // Move the tab bar to the proper location.
-        priv.toolbar.remove(priv.tab_bar.as(gtk.Widget));
+        // Move the tab bar to the proper location. When the location is
+        // horizontal (top/bottom), the tab bar docks into the toolbar and
+        // the sidebar is hidden. When vertical (left/right), the tab bar
+        // is undocked and the sidebar takes over instead.
+        //
+        // Only remove the tab bar if it's currently docked. Unlike the
+        // top/bottom cases, the left/right case never re-adds it, so on
+        // the next call it would no longer be a child of the toolbar and
+        // `remove` would hit a GTK critical ("tried to remove non-child").
+        if (priv.tab_bar.as(gtk.Widget).getParent()) |_| {
+            priv.toolbar.remove(priv.tab_bar.as(gtk.Widget));
+        }
         switch (config.@"gtk-tabs-location") {
-            .top => priv.toolbar.addTopBar(priv.tab_bar.as(gtk.Widget)),
-            .bottom => priv.toolbar.addBottomBar(priv.tab_bar.as(gtk.Widget)),
+            .top => {
+                self.hideTabSidebar();
+                priv.toolbar.addTopBar(priv.tab_bar.as(gtk.Widget));
+            },
+            .bottom => {
+                self.hideTabSidebar();
+                priv.toolbar.addBottomBar(priv.tab_bar.as(gtk.Widget));
+            },
+            .left, .right => |loc| {
+                // Unlike Adw.TabBar's horizontal strip, a deliberately
+                // chosen persistent sidebar shouldn't autohide just
+                // because there's only one tab (matches Zen/Arc/cmux
+                // convention) -- so autohide-by-tab-count doesn't apply
+                // here, only the config visibility and the user's
+                // explicit toggle.
+                if (self.getTabsVisible() and !priv.sidebar_user_hidden) {
+                    self.showTabSidebar(if (loc == .left) .start else .end);
+                } else {
+                    self.hideTabSidebar();
+                }
+            },
         }
 
         // Do our window-protocol specific appearance sync.
         priv.winproto.syncAppearance() catch |err| {
             log.warn("failed to sync winproto appearance error={}", .{err});
         };
+    }
+
+    /// Show the tab sidebar as the given side of `split_view`, swapping it
+    /// with the tab overview if necessary. A no-op (aside from re-asserting
+    /// the position) if the sidebar is already shown on that side.
+    fn showTabSidebar(self: *Self, side: enum { start, end }) void {
+        const priv = self.private();
+        const sidebar = priv.tab_sidebar.as(gtk.Widget);
+        const content = priv.tab_overview.as(gtk.Widget);
+
+        // `setStartChild`/`setEndChild` require the widget being assigned
+        // to have no current parent (or already be in that exact slot).
+        // Since we may be swapping which slot each widget occupies,
+        // clear both slots first so neither assignment below ever hits a
+        // widget still parented in the *other* slot.
+        priv.split_view.setStartChild(null);
+        priv.split_view.setEndChild(null);
+        switch (side) {
+            .start => {
+                priv.split_view.setStartChild(sidebar);
+                priv.split_view.setEndChild(content);
+            },
+            .end => {
+                priv.split_view.setStartChild(content);
+                priv.split_view.setEndChild(sidebar);
+            },
+        }
+        priv.split_view.setResizeStartChild(@intFromBool(side == .end));
+        priv.split_view.setResizeEndChild(@intFromBool(side == .start));
+        priv.split_view.setShrinkStartChild(@intFromBool(false));
+        priv.split_view.setShrinkEndChild(@intFromBool(false));
+
+        // Only set an initial divider position the moment the sidebar
+        // transitions from hidden to shown, so we don't clobber the
+        // user's manually-dragged divider on every subsequent sync.
+        if (!priv.sidebar_shown) {
+            const default_sidebar_width = 220;
+            priv.split_view.setPosition(switch (side) {
+                .start => default_sidebar_width,
+                .end => @max(
+                    default_sidebar_width,
+                    priv.split_view.as(gtk.Widget).getWidth() - default_sidebar_width,
+                ),
+            });
+            priv.sidebar_shown = true;
+        }
+    }
+
+    /// Hide the tab sidebar, giving the tab overview the entire pane.
+    fn hideTabSidebar(self: *Self) void {
+        const priv = self.private();
+        priv.split_view.setStartChild(null);
+        priv.split_view.setEndChild(null);
+        priv.split_view.setStartChild(priv.tab_overview.as(gtk.Widget));
+        priv.sidebar_shown = false;
     }
 
     /// Sync the state of any actions on this window.
@@ -1020,6 +1138,17 @@ pub const Window = extern struct {
         return self.as(gtk.Window).isMaximized() != 0;
     }
 
+    /// The `gtk-titlebar-style = tabs` mode merges the horizontal tab bar
+    /// into the header bar, so it has no meaning when the tab bar is
+    /// vertical (a sidebar). In that case we treat it as `native` for the
+    /// purposes of headerbar/tab-bar visibility and autohide.
+    fn effectiveTitlebarStyle(config: *const configpkg.Config) TitlebarStyle {
+        return switch (config.@"gtk-tabs-location") {
+            .top, .bottom => config.@"gtk-titlebar-style",
+            .left, .right => .native,
+        };
+    }
+
     fn getHeaderbarVisible(self: *Self) bool {
         const priv = self.private();
 
@@ -1043,7 +1172,7 @@ pub const Window = extern struct {
             return false;
         }
 
-        return switch (config.@"gtk-titlebar-style") {
+        return switch (effectiveTitlebarStyle(config)) {
             // If the titlebar style is tabs never show the titlebar.
             .tabs => false,
 
@@ -1057,7 +1186,7 @@ pub const Window = extern struct {
         const priv = self.private();
         const config = if (priv.config) |v| v.get() else return true;
 
-        return switch (config.@"gtk-titlebar-style") {
+        return switch (effectiveTitlebarStyle(config)) {
             // If the titlebar style is tabs we cannot autohide.
             .tabs => false,
 
@@ -1079,7 +1208,7 @@ pub const Window = extern struct {
         const priv = self.private();
         const config = if (priv.config) |v| v.get() else return true;
 
-        switch (config.@"gtk-titlebar-style") {
+        switch (effectiveTitlebarStyle(config)) {
             .tabs => {
                 // *Conditionally* disable the tab bar when maximized, the titlebar
                 // style is tabs, and gtk-titlebar-hide-when-maximized is set.
@@ -1333,6 +1462,12 @@ pub const Window = extern struct {
         }
 
         priv.tab_bindings.setSource(null);
+
+        // Drop the extra references taken in init() so the tab sidebar
+        // and tab overview can be finalized even though they may not
+        // currently be parented inside split_view.
+        priv.tab_sidebar.unref();
+        priv.tab_overview.unref();
 
         gtk.Widget.disposeTemplate(
             self.as(gtk.Widget),
@@ -2191,6 +2326,7 @@ pub const Window = extern struct {
             gobject.ext.ensureType(SplitTree);
             gobject.ext.ensureType(Surface);
             gobject.ext.ensureType(Tab);
+            gobject.ext.ensureType(TabSidebar);
             gtk.Widget.Class.setTemplateFromResource(
                 class.as(gtk.Widget.Class),
                 comptime gresource.blueprint(.{
@@ -2220,6 +2356,8 @@ pub const Window = extern struct {
             class.bindTemplateChildPrivate("tab_view", .{});
             class.bindTemplateChildPrivate("toolbar", .{});
             class.bindTemplateChildPrivate("toast_overlay", .{});
+            class.bindTemplateChildPrivate("split_view", .{});
+            class.bindTemplateChildPrivate("tab_sidebar", .{});
 
             // Template Callbacks
             class.bindTemplateCallback("realize", &windowRealize);

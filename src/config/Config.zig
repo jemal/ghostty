@@ -2319,6 +2319,14 @@ keybind: Keybinds = .{},
 ///    Never show the tab bar. Tabs are only accessible via the tab
 ///    overview or by keybind actions.
 ///
+/// When `gtk-tabs-location` is `left` or `right` (a vertical sidebar
+/// instead of a horizontal bar), `auto` and `always` behave identically:
+/// the sidebar always shows regardless of tab count, since a persistent
+/// sidebar isn't worth auto-hiding for a single tab the way the
+/// horizontal bar is. Only `never` differs in that case. The
+/// `toggle_tab_sidebar` keybind action can be used to hide/show it
+/// temporarily regardless of this setting.
+///
 /// Currently only supported on Linux (GTK).
 @"window-show-tab-bar": WindowShowTabBar = .auto,
 
@@ -3667,14 +3675,13 @@ else
 /// under macOS.
 @"gtk-titlebar": bool = true,
 
-/// Determines the side of the screen that the GTK tab bar will stick to.
-/// Top, bottom, and hidden are supported. The default is top.
+/// Determines where the GTK tab bar is placed. Valid values are `top`,
+/// `bottom`, `left`, and `right`. The default is top.
 ///
-/// When `hidden` is set, a tab button displaying the number of tabs will appear
-/// in the title bar. It has the ability to open a tab overview for displaying
-/// tabs. Alternatively, you can use the `toggle_tab_overview` action in a
-/// keybind if your window doesn't have a title bar, or you can switch tabs
-/// with keybinds.
+/// When set to `left` or `right`, the tab bar is rendered as a vertical
+/// list in a sidebar instead of a horizontal bar. In that case,
+/// `gtk-titlebar-style = tabs` has no effect, since that style merges the
+/// horizontal tab bar into the header bar.
 @"gtk-tabs-location": GtkTabsLocation = .top,
 
 /// If this is `true`, the titlebar will be hidden when the window is maximized,
@@ -9073,6 +9080,8 @@ pub const GtkSingleInstance = enum {
 pub const GtkTabsLocation = enum {
     top,
     bottom,
+    left,
+    right,
 };
 
 /// See gtk-toolbar-style

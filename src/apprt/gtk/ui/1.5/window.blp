@@ -20,88 +20,47 @@ template $GhosttyWindow: Adw.ApplicationWindow {
   // to disable this so that terminal programs can capture F10 (such as htop)
   handle-menubar-accel: false;
 
-  content: Adw.TabOverview tab_overview {
-    create-tab => $overview_create_tab();
-    notify::open => $overview_notify_open();
-    view: tab_view;
-    enable-new-tab: true;
-    // Disable the title buttons (close, maximize, minimize, ...)
-    // *inside* the tab overview if CSDs are disabled.
-    // We do spare the search button, though.
-    show-start-title-buttons: bind template.decorated;
-    show-end-title-buttons: bind template.decorated;
+  content: Gtk.Paned split_view {
+    orientation: horizontal;
+    shrink-start-child: false;
+    shrink-end-child: false;
 
-    Adw.ToolbarView toolbar {
-      top-bar-style: bind template.toolbar-style;
-      bottom-bar-style: bind template.toolbar-style;
+    start-child: $GhosttyTabSidebar tab_sidebar {
+      tab-view: tab_view;
+    };
 
-      [top]
-      Adw.HeaderBar {
-        visible: bind template.headerbar-visible;
+    end-child: Adw.TabOverview tab_overview {
+      create-tab => $overview_create_tab();
+      notify::open => $overview_notify_open();
+      view: tab_view;
+      enable-new-tab: true;
+      // Disable the title buttons (close, maximize, minimize, ...)
+      // *inside* the tab overview if CSDs are disabled.
+      // We do spare the search button, though.
+      show-start-title-buttons: bind template.decorated;
+      show-end-title-buttons: bind template.decorated;
 
-        title-widget: Adw.WindowTitle {
-          title: bind template.title;
-          // Blueprint auto-formatter won't let me split this into multiple
-          // lines. Let me explain myself. All parameters to a closure are used
-          // as notifications to recompute the value of the closure. All
-          // elements of a property chain are also subscribed to for changes.
-          // This one long, ugly line saves us from manually building up this
-          // massive notify chain in code.
-          subtitle: bind $computed_subtitle(template.config, tab_view.selected-page.child as <$GhosttyTab>.active-surface as <$GhosttySurface>.pwd) as <string>;
-        };
+      Adw.ToolbarView toolbar {
+        top-bar-style: bind template.toolbar-style;
+        bottom-bar-style: bind template.toolbar-style;
 
-        [start]
-        Adw.SplitButton {
-          clicked => $new_tab();
-          icon-name: "tab-new-symbolic";
-          tooltip-text: _("New Tab");
-          dropdown-tooltip: _("New Split");
-          menu-model: split_menu;
-          can-focus: false;
-          focus-on-click: false;
-        }
+        [top]
+        Adw.HeaderBar {
+          visible: bind template.headerbar-visible;
 
-        [end]
-        Gtk.Box {
-          Gtk.ToggleButton {
-            icon-name: "view-grid-symbolic";
-            tooltip-text: _("View Open Tabs");
-            active: bind tab_overview.open bidirectional;
-            can-focus: false;
-            focus-on-click: false;
-          }
+          title-widget: Adw.WindowTitle {
+            title: bind template.title;
+            // Blueprint auto-formatter won't let me split this into multiple
+            // lines. Let me explain myself. All parameters to a closure are used
+            // as notifications to recompute the value of the closure. All
+            // elements of a property chain are also subscribed to for changes.
+            // This one long, ugly line saves us from manually building up this
+            // massive notify chain in code.
+            subtitle: bind $computed_subtitle(template.config, tab_view.selected-page.child as <$GhosttyTab>.active-surface as <$GhosttySurface>.pwd) as <string>;
+          };
 
-          Gtk.MenuButton {
-            notify::active => $notify_menu_active();
-            icon-name: "open-menu-symbolic";
-            menu-model: main_menu;
-            tooltip-text: _("Main Menu");
-            can-focus: false;
-          }
-        }
-      }
-
-      [top]
-      Adw.TabBar tab_bar {
-        autohide: bind template.tabs-autohide;
-        expand-tabs: bind template.tabs-wide;
-        view: tab_view;
-        visible: bind template.tabs-visible;
-
-        [start]
-        Gtk.Box {
-          orientation: horizontal;
-          visible: bind $titlebar_style_is_tabs(template.titlebar-style) as <bool>;
-
-          Gtk.WindowControls {
-            side: start;
-          }
-
+          [start]
           Adw.SplitButton {
-            styles [
-              "flat",
-            ]
-
             clicked => $new_tab();
             icon-name: "tab-new-symbolic";
             tooltip-text: _("New Tab");
@@ -110,65 +69,116 @@ template $GhosttyWindow: Adw.ApplicationWindow {
             can-focus: false;
             focus-on-click: false;
           }
+
+          [end]
+          Gtk.Box {
+            Gtk.ToggleButton {
+              icon-name: "view-grid-symbolic";
+              tooltip-text: _("View Open Tabs");
+              active: bind tab_overview.open bidirectional;
+              can-focus: false;
+              focus-on-click: false;
+            }
+
+            Gtk.MenuButton {
+              notify::active => $notify_menu_active();
+              icon-name: "open-menu-symbolic";
+              menu-model: main_menu;
+              tooltip-text: _("Main Menu");
+              can-focus: false;
+            }
+          }
         }
 
-        [end]
-        Gtk.Box {
-          orientation: horizontal;
-          visible: bind $titlebar_style_is_tabs(template.titlebar-style) as <bool>;
+        [top]
+        Adw.TabBar tab_bar {
+          autohide: bind template.tabs-autohide;
+          expand-tabs: bind template.tabs-wide;
+          view: tab_view;
+          visible: bind template.tabs-visible;
 
-          Gtk.ToggleButton {
-            styles [
-              "flat",
-            ]
+          [start]
+          Gtk.Box {
+            orientation: horizontal;
+            visible: bind $titlebar_style_is_tabs(template.titlebar-style) as <bool>;
 
-            icon-name: "view-grid-symbolic";
-            tooltip-text: _("View Open Tabs");
-            active: bind tab_overview.open bidirectional;
-            can-focus: false;
-            focus-on-click: false;
+            Gtk.WindowControls {
+              side: start;
+            }
+
+            Adw.SplitButton {
+              styles [
+                "flat",
+              ]
+
+              clicked => $new_tab();
+              icon-name: "tab-new-symbolic";
+              tooltip-text: _("New Tab");
+              dropdown-tooltip: _("New Split");
+              menu-model: split_menu;
+              can-focus: false;
+              focus-on-click: false;
+            }
           }
 
-          Gtk.MenuButton {
-            styles [
-              "flat",
-            ]
+          [end]
+          Gtk.Box {
+            orientation: horizontal;
+            visible: bind $titlebar_style_is_tabs(template.titlebar-style) as <bool>;
 
-            notify::active => $notify_menu_active();
-            icon-name: "open-menu-symbolic";
-            menu-model: main_menu;
-            tooltip-text: _("Main Menu");
-            can-focus: false;
+            Gtk.ToggleButton {
+              styles [
+                "flat",
+              ]
+
+              icon-name: "view-grid-symbolic";
+              tooltip-text: _("View Open Tabs");
+              active: bind tab_overview.open bidirectional;
+              can-focus: false;
+              focus-on-click: false;
+            }
+
+            Gtk.MenuButton {
+              styles [
+                "flat",
+              ]
+
+              notify::active => $notify_menu_active();
+              icon-name: "open-menu-symbolic";
+              menu-model: main_menu;
+              tooltip-text: _("Main Menu");
+              can-focus: false;
+            }
+
+            Gtk.WindowControls {
+              side: end;
+            }
+          }
+        }
+
+        Box {
+          orientation: vertical;
+
+          $GhosttyDebugWarning {
+            visible: bind template.debug;
           }
 
-          Gtk.WindowControls {
-            side: end;
+          Adw.ToastOverlay toast_overlay {
+            Adw.TabView tab_view {
+              notify::n-pages => $notify_n_pages();
+              notify::selected-page => $notify_selected_page();
+              close-page => $close_page();
+              page-attached => $page_attached();
+              page-detached => $page_detached();
+              create-window => $tab_create_window();
+              setup-menu => $setup_tab_menu();
+              menu-model: tab_context_menu;
+              shortcuts: none;
+            }
           }
         }
       }
-
-      Box {
-        orientation: vertical;
-
-        $GhosttyDebugWarning {
-          visible: bind template.debug;
-        }
-
-        Adw.ToastOverlay toast_overlay {
-          Adw.TabView tab_view {
-            notify::n-pages => $notify_n_pages();
-            notify::selected-page => $notify_selected_page();
-            close-page => $close_page();
-            page-attached => $page_attached();
-            page-detached => $page_detached();
-            create-window => $tab_create_window();
-            setup-menu => $setup_tab_menu();
-            menu-model: tab_context_menu;
-            shortcuts: none;
-          }
-        }
-      }
-    }
+    };
   };
 }
 

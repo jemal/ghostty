@@ -1,0 +1,32 @@
+using Gtk 4.0;
+using Adw 1;
+
+template $GhosttyTabSidebarRow: Gtk.Box {
+  orientation: horizontal;
+  spacing: 6;
+  tooltip-text: bind template.page as <Adw.TabPage>.tooltip;
+
+  styles [
+    "tab-sidebar-row",
+  ]
+
+  Gtk.Label {
+    label: bind template.page as <Adw.TabPage>.title;
+    ellipsize: end;
+    halign: start;
+    hexpand: true;
+    single-line-mode: true;
+  }
+
+  Gtk.Button {
+    icon-name: "window-close-symbolic";
+    tooltip-text: _("Close Tab");
+    clicked => $close_clicked();
+    can-focus: false;
+
+    styles [
+      "flat",
+      "circular",
+    ]
+  }
+}

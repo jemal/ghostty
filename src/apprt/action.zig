@@ -353,6 +353,9 @@ pub const Action = union(Key) {
     /// tabs or windows this way).
     move_split: MoveSplit,
 
+    /// Toggle the vertical tab sidebar shown/hidden.
+    toggle_tab_sidebar,
+
     /// Sync with: ghostty_action_tag_e
     pub const Key = enum(c_int) {
         quit,
@@ -422,6 +425,7 @@ pub const Action = union(Key) {
         readonly,
         copy_title_to_clipboard,
         move_split,
+        toggle_tab_sidebar,
 
         test "ghostty.h Action.Key" {
             try lib.checkGhosttyHEnum(Key, "GHOSTTY_ACTION_");
