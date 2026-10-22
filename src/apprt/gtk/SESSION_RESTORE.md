@@ -45,6 +45,26 @@ all snapshot generations belonging to that session. Delete is disabled for
 open sessions; Archive and Close is the explicit way to stop a running session.
 The app finishes pending saves before modifying storage.
 
+## CLI tab creation
+
+Create a tab in an existing GTK instance with a directory and command:
+
+```sh
+ghostty +new-tab --working-directory=/tmp -e nu
+```
+
+Put options before `-e`; all following arguments belong to the command.
+An explicit directory takes precedence over parent-pane directory inheritance.
+Without `--working-directory`, the CLI forwards its own current directory and
+that likewise takes precedence. Relative directory arguments resolve against
+the CLI caller's directory. Normal keyboard-created tabs continue to follow
+`tab-inherit-working-directory`.
+
+The new process starts from the running Ghostty application's environment,
+with configured environment overrides and any shell startup changes. The CLI
+does not forward the invoking shell's environment (for example, temporary
+exports or a development shell's PATH).
+
 ## Compact tabs
 
 `gtk-tabs-style = compact` adds a shared rounded tab rail that grows and shrinks

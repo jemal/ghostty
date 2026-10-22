@@ -809,8 +809,11 @@ pub const Surface = extern struct {
         // Remainder needs a config. If there is no config we just assume
         // we aren't inheriting any of these values.
         if (priv.config) |config_obj| {
-            // Setup our cwd if configured to inherit
-            if (apprt.surface.shouldInheritWorkingDirectory(context, config_obj.get())) {
+            // CLI-supplied directories (including +new-tab's caller cwd) take
+            // precedence over parent-pane inheritance.
+            if (priv.overrides.working_directory == null and
+                apprt.surface.shouldInheritWorkingDirectory(context, config_obj.get()))
+            {
                 if (parent.rt_surface.surface.getPwd()) |pwd| {
                     priv.pwd = glib.ext.dupeZ(u8, pwd);
                     self.as(gobject.Object).notifyByPspec(properties.pwd.impl.param_spec);
@@ -3630,18 +3633,20 @@ pub const Surface = extern struct {
             priv.overrides.command,
             priv.overrides.shell_integration,
         );
-        if (priv.overrides.working_directory) |wd| {
-            const config_alloc = config.arenaAlloc();
-            var wd_val: configpkg.WorkingDirectory = .{ .path = try config_alloc.dupe(u8, wd) };
-            try wd_val.finalize(config_alloc);
-            config.@"working-directory" = wd_val;
-        }
 
         // Properties that can impact surface init
         if (priv.font_size_request) |size| config.@"font-size" = size.points;
         if (priv.pwd) |pwd| {
             const config_alloc = config.arenaAlloc();
             var wd_val: configpkg.WorkingDirectory = .{ .path = try config_alloc.dupe(u8, pwd) };
+            try wd_val.finalize(config_alloc);
+            config.@"working-directory" = wd_val;
+        }
+
+        // Explicit overrides also win over restored/otherwise supplied pwd.
+        if (priv.overrides.working_directory) |wd| {
+            const config_alloc = config.arenaAlloc();
+            var wd_val: configpkg.WorkingDirectory = .{ .path = try config_alloc.dupe(u8, wd) };
             try wd_val.finalize(config_alloc);
             config.@"working-directory" = wd_val;
         }
