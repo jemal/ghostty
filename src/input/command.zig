@@ -453,6 +453,12 @@ fn actionCommands(action: Action.Key) []const Command {
             .description = i18n.N_("Toggle the tab overview."),
         }},
 
+        .switch_session => comptime &.{.{
+            .action = .switch_session,
+            .title = i18n.N_("Sessions…"),
+            .description = i18n.N_("Find, open, and manage saved sessions (GTK only)."),
+        }},
+
         .pick_theme => comptime &.{.{
             .action = .pick_theme,
             .title = i18n.N_("Pick Theme…"),

@@ -5630,6 +5630,12 @@ pub fn performBindingAction(self: *Surface, action: input.Binding.Action) !bool 
             {},
         ),
 
+        .switch_session => {
+            if (comptime @hasDecl(apprt.Surface, "switchSession"))
+                return self.rt_surface.switchSession();
+            return false;
+        },
+
         .pick_theme => {
             if (comptime @hasDecl(apprt.Surface, "pickTheme"))
                 return self.rt_surface.pickTheme();

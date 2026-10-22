@@ -333,7 +333,6 @@ pub const Window = extern struct {
         session_hash: ?u64 = null,
         archive_on_close: bool = false,
         session_archived: bool = false,
-        session_menu: ?*gio.Menu = null,
         toolbar_visible_override: ?bool = null,
 
         theme: ThemePicker.State = .{},
@@ -345,7 +344,6 @@ pub const Window = extern struct {
         tab_view: *adw.TabView,
         toolbar: *adw.ToolbarView,
         toast_overlay: *adw.ToastOverlay,
-        session_button: *gtk.MenuButton,
 
         pub var offset: c_int = 0;
     };
@@ -437,12 +435,6 @@ pub const Window = extern struct {
         priv.session_id = sessions.newId(global.io());
         var name_buf: [64]u8 = undefined;
         self.setSessionName(std.mem.print(&name_buf, "Session {x}", .{priv.session_id & 0xffffff}) catch unreachable);
-        const menu = gio.Menu.new();
-        priv.session_menu = menu;
-        menu.append(i18n._("New Session"), "win.new-session");
-        menu.append(i18n._("Rename Session…"), "win.rename-session");
-        menu.append(i18n._("Switch Session…"), "win.switch-session");
-        priv.session_button.setMenuModel(menu.as(gio.MenuModel));
 
         // We need to do this so that the title initializes properly,
         // I think because its a dynamic getter.
@@ -1190,43 +1182,18 @@ pub const Window = extern struct {
         }
     }
 
-    fn sessionMenuOpened(button: *gtk.MenuButton, _: *gobject.ParamSpec, self: *Self) callconv(.c) void {
-        if (button.getActive() == 0) return;
-        const app = Application.default();
-        app.saveSessions();
-        const menu = self.private().session_menu orelse return;
-        menu.removeAll();
-        menu.append(i18n._("New Session"), "win.new-session");
-        menu.append(i18n._("Rename Session…"), "win.rename-session");
-        menu.append(i18n._("Switch Session…"), "win.switch-session");
-        var arena: std.heap.ArenaAllocator = .init(app.allocator());
-        defer arena.deinit();
-        const dir = app.sessionDir() catch return;
-        defer dir.close(global.io());
-        const entries = sessions.list(dir, global.io(), arena.allocator()) catch return;
-        const saved = gio.Menu.new();
-        defer saved.unref();
-        for (entries) |entry| {
-            const item = gio.MenuItem.new(entry.name, null);
-            defer item.unref();
-            item.setActionAndTargetValue("win.open-session", glib.Variant.newUint64(entry.id));
-            saved.appendItem(item);
-        }
-        menu.appendSection(i18n._("Sessions"), saved.as(gio.MenuModel));
-        menu.append(i18n._("Manage Sessions…"), "win.manage-sessions");
-    }
-
     fn actionSwitchSession(_: *gio.SimpleAction, _: ?*glib.Variant, self: *Self) callconv(.c) void {
-        const surface = self.getActiveSurface() orelse return;
-        const service = Application.default().picker() orelse return;
-        service.switchSession(surface) catch |err| {
-            log.warn("unable to show session picker: {}", .{err});
-            self.addToast(i18n._("Unable to open session picker."));
-        };
+        _ = self.switchSession();
     }
 
-    fn actionManageSessions(_: *gio.SimpleAction, _: ?*glib.Variant, _: *Self) callconv(.c) void {
-        @import("session_manager.zig").SessionManager.present();
+    pub fn switchSession(self: *Self) bool {
+        if (!Application.default().sessionsEnabled()) return false;
+        @import("session_manager.zig").SessionManager.present(self);
+        return true;
+    }
+
+    fn actionManageSessions(_: *gio.SimpleAction, _: ?*glib.Variant, self: *Self) callconv(.c) void {
+        _ = self.switchSession();
     }
 
     pub fn renameSession(self: *Self, name: []const u8) void {
@@ -1905,7 +1872,6 @@ pub const Window = extern struct {
         priv.winproto.deinit();
         if (priv.title_override) |v| glib.free(@ptrCast(@constCast(v)));
         if (priv.session_name) |v| glib.free(@ptrCast(@constCast(v)));
-        if (priv.session_menu) |menu| menu.unref();
 
         gobject.Object.virtual_methods.finalize.call(
             Class.parent,
@@ -2861,7 +2827,6 @@ pub const Window = extern struct {
             class.bindTemplateChildPrivate("tab_view", .{});
             class.bindTemplateChildPrivate("toolbar", .{});
             class.bindTemplateChildPrivate("toast_overlay", .{});
-            class.bindTemplateChildPrivate("session_button", .{});
 
             // Template Callbacks
             class.bindTemplateCallback("realize", &windowRealize);
@@ -2889,7 +2854,6 @@ pub const Window = extern struct {
             class.bindTemplateCallback("session_name_width", &closureSessionNameWidth);
             class.bindTemplateCallback("computed_title", &closureTitle);
             class.bindTemplateCallback("computed_subtitle", &closureSubtitle);
-            class.bindTemplateCallback("session_menu_opened", &sessionMenuOpened);
 
             // Virtual methods
             gobject.Object.virtual_methods.dispose.implement(class, &dispose);

@@ -602,6 +602,9 @@ pub const Action = union(enum) {
     /// Only supported by the GTK runtime.
     toggle_toolbar,
 
+    /// Open the saved-session picker (GTK only).
+    switch_session,
+
     /// Preview installed themes in the current window (GTK only).
     pick_theme,
 
@@ -1476,6 +1479,7 @@ pub const Action = union(enum) {
             .toggle_tab_overview,
             .toggle_toolbar,
             .pick_theme,
+            .switch_session,
             .new_split,
             .goto_split,
             .move_split,

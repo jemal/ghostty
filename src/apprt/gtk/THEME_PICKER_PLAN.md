@@ -1,14 +1,16 @@
 # Live theme picker: implementation plan
 
-Status: initial implementation on 2026-10-22; uncommitted. The user approved
-the look and basic behavior after a desktop trial on 2026-10-22. A subsequent
-ReleaseFast trial exposed a GTK focus-change assertion. Focus-loss dismissal
-now runs on an idle callback, and focus is restored only if still owned by the
-picker. The ReleaseFast rebuild passed and was installed under `~/.local`;
-desktop confirmation after a full application restart is pending. The GTK build and focused theme
-tests previously passed.
-Isolated X11 screenshot testing is paused at the user's request; use build and
-logic checks, then iterate with the user on the normal desktop.
+Status: implemented and committed on 2026-10-22 (jj change `ptqyknxn` in
+`folie`). The user approved the appearance and later reported the fixes seem
+good for now. Escape cleanup disconnects callbacks before freeing state;
+focus-loss dismissal runs on an idle callback, and terminal focus is restored
+only when still owned by the picker. GTK builds and focused theme tests passed.
+The local ReleaseFast install now uses `-fsys=fontconfig` after a separate
+font-zoom crash exposed the bundled/system Fontconfig conflict.
+
+Do not run isolated X11/Xvfb screenshot or screenshot-viewing workflows for
+routine validation. Use builds, focused logic checks, and normal desktop user
+feedback. Provisional user approval does not establish extended stability.
 
 Implementation uses a color-only renderer/terminal update, window-scoped CSS,
 and an internal selection callback on the reusable picker. The config helper
@@ -78,7 +80,7 @@ Extend the reusable list with an optional internal selection-change callback, se
 - Notify on keyboard navigation, filtering, and pointer selection, deduplicated by selected ID. Report an empty selection explicitly.
 - Let callers choose the initial row without triggering a preview on opening.
 - Coalesce rapid changes with a short debounce (initially around 75 ms). Enter flushes the latest selection before acceptance.
-- Keep the external `+pick` request/response schema and session-picker behavior unchanged. Internal theme rows are not constrained by IPC serialization limits.
+- Keep the external `+pick` request/response schema unchanged. Session switching now uses the separate unified Sessions overlay. Internal theme rows are not constrained by IPC serialization limits.
 - Decide and enforce mutual exclusion with other pickers in the same window. Opening another picker first cancels the theme transaction and restores its baseline; pickers in other windows continue normally.
 
 ### 4. Own the transaction in the window

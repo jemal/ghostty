@@ -12,7 +12,6 @@ const ext = @import("../ext.zig");
 const WeakRef = @import("../weak_ref.zig").WeakRef;
 const List = @import("list.zig");
 const protocol = @import("protocol.zig");
-const i18n = @import("../../../os/main.zig").i18n;
 
 app: *Application,
 alloc: std.mem.Allocator,
@@ -181,38 +180,7 @@ fn select(self: *Self, sender: [*:0]const u8, text: []const u8, invocation: *gio
     transferred = true;
 }
 
-/// Internal provider: use the same widget/lifetime controller without IPC or JSON.
-pub fn switchSession(self: *Self, surface: *Surface) !void {
-    if (!self.app.sessionsEnabled()) return error.SessionsDisabled;
-    const sessions = @import("../session.zig");
-    self.app.saveSessions();
-    const arena = try self.alloc.create(std.heap.ArenaAllocator);
-    arena.* = .init(self.alloc);
-    var parsed: std.json.Parsed(protocol.Request) = .{ .arena = arena, .value = undefined };
-    errdefer parsed.deinit();
-    const alloc = arena.allocator();
-    const dir = try self.app.sessionDir();
-    defer dir.close(global.io());
-    const entries = try sessions.list(dir, global.io(), alloc);
-    if (entries.len == 0) return error.NoSessions;
-    const choices = try alloc.alloc(protocol.Choice, entries.len);
-    for (entries, 0..) |session, i| choices[i] = .{
-        .id = try alloc.print("0x{x:0>16}", .{session.id}),
-        .label = session.name,
-        .description = std.mem.span(if (self.app.sessionWindow(session.id) != null) i18n._("Open") else i18n._("Saved")),
-    };
-    parsed.value = .{
-        .version = 1,
-        .request_id = "switch-session",
-        .title = std.mem.span(i18n._("Switch Session")),
-        .placeholder = std.mem.span(i18n._("Search sessions…")),
-        .choices = choices,
-    };
-    try self.present(surface, parsed, "", null);
-}
-
-/// Takes ownership of parsed only on success. A null invocation is an internal
-/// session provider; external clients never receive an internal-action field.
+/// Takes ownership of parsed only on success.
 fn present(self: *Self, surface: *Surface, parsed: std.json.Parsed(protocol.Request), sender: []const u8, invocation: ?*gio.DBusMethodInvocation) !void {
     const request = parsed.value;
     if (ext.getAncestor(Window, surface.as(gtk.Widget))) |window| window.cancelThemePicker();
@@ -272,14 +240,10 @@ fn finish(self: *Self, entry: *Entry, index: ?usize, reason: []const u8, restore
     if (entry.timer != 0) _ = glib.Source.remove(entry.timer);
     if (entry.watch != 0) gio.busUnwatchName(entry.watch);
     if (entry.surface.get()) |surface| {
-        surface.hidePicker(entry.list.frame.as(gtk.Widget), restore_focus and !(entry.invocation == null and index != null));
+        surface.hidePicker(entry.list.frame.as(gtk.Widget), restore_focus);
         surface.unref();
     }
     entry.surface.deinit();
-    const session_id: ?u64 = if (entry.invocation == null and index != null)
-        std.fmt.parseUnsigned(u64, entry.request.value.choices[index.?].id, 0) catch null
-    else
-        null;
     if (entry.invocation) |invocation| {
         const response: protocol.Response = if (index) |i| .{
             .request_id = entry.request.value.request_id,
@@ -296,10 +260,6 @@ fn finish(self: *Self, entry: *Entry, index: ?usize, reason: []const u8, restore
     entry.request.deinit();
     self.alloc.free(entry.sender);
     self.alloc.destroy(entry);
-    // Revalidates session existence and focuses an open window or restores it.
-    if (session_id) |id| self.app.openSession(id) catch |err| {
-        std.log.warn("unable to switch session: {}", .{err});
-    };
 }
 
 fn noDestroy(_: ?*anyopaque) callconv(.c) void {}

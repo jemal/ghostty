@@ -32,6 +32,14 @@ pub fn sessionSnapshot(self: *Self) ?[]const u8 {
     return self.surface.sessionSnapshot();
 }
 
+pub fn switchSession(self: *Self) bool {
+    const window = @import("ext.zig").getAncestor(
+        @import("class/window.zig").Window,
+        self.surface.as(@import("gtk").Widget),
+    ) orelse return false;
+    return window.switchSession();
+}
+
 pub fn pickTheme(self: *Self) bool {
     const window = @import("ext.zig").getAncestor(
         @import("class/window.zig").Window,

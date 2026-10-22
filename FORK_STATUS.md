@@ -7,12 +7,16 @@ This document records the work completed across the two development chats, the c
 ## Current checkpoint
 
 - Repository: `/home/jemal/dev/projects/ghostty`
-- Latest completed commit: `88b3075cea82` — `gtk: add pane-scoped picker IPC and cursor-anchored selection`.
-- The implementation was committed and the working copy was clean before adding this document.
-- An empty jj working change was created for subsequent work. This document is a new, uncommitted addition.
-- The development preview executable at `zig-out/bin/ghostty` includes the completed picker work and the uncommitted theme-derived chrome and live theme picker changes described below.
-- New work since the picker checkpoint: the user approved trying the Quiet rail chrome design. The chrome and subsequent live theme picker implementation are uncommitted; the remaining ideas are still proposals.
-- Updating the regular Nix/Home Manager installation to this checkpoint is a separate step; its current installed revision has not been reverified here.
+- `folie` contains the fork history, including themed chrome, the live theme
+  picker, the CLI working-directory fix, and the local Fontconfig build guidance.
+- The old feature bookmarks were removed; their commits remain in `folie`.
+- Daily use is through `~/.local/bin/ghostty`, built with system Fontconfig.
+  The user reports that the font-zoom and theme-picker fixes seem good for now.
+- Session switching and management are merged into one searchable overlay.
+- The merged overlay passed the GTK ReleaseFast build, formatting, and shortcut
+  configuration validation and is installed locally (22:23 CEST). The user
+  responded positively to the merged overlay; extended lifecycle testing is
+  not claimed.
 
 The fork is usable for daily local workflows. The next useful step is to build real integrations on the existing features, while keeping further UI changes focused.
 
@@ -52,6 +56,38 @@ Linking system Fontconfig removes the duplicate implementation. The rebuilt
 binary imports system Fontconfig and passes font discovery. The user reports
 that the fixes seem good in normal desktop use for now; longer-term stability
 remains subject to continued use.
+
+## Desktop integration and continuation notes
+
+- Home Manager source: `~/.config/hamlet/modules/ghostty.mod.nix`.
+  On Linux, `programs.ghostty.package = null` and `systemd.enable = false`.
+  A declarative drop-in at
+  `systemd/user/app-com.mitchellh.ghostty.service.d/local-binary.conf`
+  clears `ExecStart` and runs the absolute local binary with
+  `--gtk-single-instance=true --initial-window=false`. Do not replace it with
+  bare `ghostty`: the systemd executable search path did not find the local
+  build, causing `203/EXEC`.
+- The local build installs D-Bus activation files. `+new-tab` and
+  `+toggle-quick-terminal` can start Ghostty on demand; enabling startup at
+  login is not needed. D-Bus sends actions directly when Ghostty is running.
+- Niri config: `~/.config/hamlet/modules/niri.config.kdl`. Super+grave runs
+  `/home/jemal/.local/bin/ghostty +toggle-quick-terminal`. Niri handles the
+  keypress, so this route does not require the global-shortcut portal.
+  The Niri config is linked directly and does not need a Nix switch.
+- Alt+Space is declared as `switch_session` in both the normal and Vim key
+  tables in Hamlet. The generated Ghostty config takes a Home Manager/Nix
+  activation to update. Restart Ghostty after binary installation; never kill
+  the user's sessions automatically.
+- Example CLI launch:
+  `ghostty +new-tab --working-directory=~/Documents/vault --title=Vault -e hx`.
+  Nushell aliases are not external executables; use `hx` directly rather than
+  `nu -c e` when `e` is an interactive alias.
+- The user chose to keep automatic restoration of the previous workspace.
+  `+new-split` is explicitly deferred. Parameterized native tab bindings are
+  deferred to Lua exploration. No next feature has been approved.
+- Next session: read this file and `src/apprt/gtk/SESSION_RESTORE.md`, inspect
+  `jj status`, and continue from `folie`. Keep UI iteration based on user
+  feedback. Do not restart isolated X11 screenshot tests.
 
 ## UI validation preference: no X11 screenshot workflow
 
@@ -94,17 +130,31 @@ Missing, corrupt, incompatible, or oversized snapshots fall back independently. 
 
 ### Session management
 
-The session menu provides:
+Clicking the session name in the header opens one searchable floating Sessions
+overlay. The command palette and GTK-only `switch_session` action open the same
+UI. Alt+Space is declared in the user's Home Manager source, including Vim
+mode. Startup restoration stays enabled.
 
-- New Session and Rename Session.
-- Switch Session: a searchable picker that focuses an open session or restores a saved session.
-- Manage Sessions: a dedicated management window.
+Type to filter names; Up/Down and Tab/Shift+Tab select a session. Rows show
+Current, Open, Saved, or Archived status. **New Session** creates a session;
+**Show archived sessions** includes the archive. A compact footer shows:
 
-The manager shows Open, Saved, and Archived status, with direct actions to open/focus, rename, archive, unarchive, and delete.
+- Enter: open or focus the selected session.
+- Ctrl+A: archive; unarchive when an archived session is selected.
+- Ctrl+R: rename the selected session.
+- Ctrl+K: delete a closed session after confirmation.
+- Escape: dismiss the overlay.
 
-Archive retains the saved layout and terminal snapshots while removing the session from the normal switcher. Archive and Close saves the latest state, follows the normal running-process close confirmation, and archives only after confirmation. The manager remains available after the last terminal window closes.
+Archiving an open session saves and closes it, with the normal running-process
+confirmation. Canceling keeps the session open and unarchived. Deletion remains
+unavailable for open sessions and removes the layout and snapshots only after
+confirmation. Pending saves finish before storage changes.
 
-Deletion requires confirmation and removes the selected session's layout and snapshot generations. It is disabled for open sessions. Pending saves are finished before storage changes.
+The overlay is owned by its host window and closes with it, including when
+that window is archived. Creating or opening a session dismisses the overlay.
+Selection is retained across refreshes, or moves to a neighboring result after
+removal. The old pane-local session picker provider was removed; the external
+picker IPC and its request/response schema are unchanged.
 
 ### Keyboard pane movement and swapping
 
@@ -138,7 +188,7 @@ keybind = ctrl+shift+b=toggle_toolbar
 
 They can also start hidden with `gtk-toolbar-visible = false`. The command palette and terminal context menu provide a way to reveal them. Config reload restores configured visibility.
 
-### Theme-derived GTK chrome (uncommitted)
+### Theme-derived GTK chrome
 
 `window-theme = ghostty` now extends the existing terminal background/foreground mapping with the Quiet rail design:
 
@@ -151,7 +201,7 @@ Explicit `window-titlebar-background` values retain their exact title/tab bar co
 
 The GTK build and Zig formatting checks passed. Isolated X11 checks verified bar and selected-tab pixel colors for Pierre Dark, Kanagawa Wave, Gruvbox Dark Hard, Pierre Light, and an explicit titlebar background. Live reload checks also covered desktop colors, bottom tabs, native tabs, the session picker, and the session manager, without GTK CSS parsing warnings. The user subsequently exercised the chrome and live theme picker on their normal desktop and approved the result on 2026-10-22.
 
-### Live theme picker (uncommitted; focus regression under review)
+### Live theme picker
 
 **Pick Theme…** is available in the main menu and command palette, with the
 GTK-only `pick_theme` binding action and no imposed default shortcut. It lists
@@ -192,7 +242,7 @@ The microfetch color issue was traced to an agent preview-launch environment:
 theme foreground. Agent previews now unset that flag; the user confirmed that
 resolved the colors. Normal user-specified `NO_COLOR` behavior remains intact.
 
-### CLI tab working-directory precedence (uncommitted)
+### CLI tab working-directory precedence
 
 A live check against the user's ReleaseFast build confirmed that
 `ghostty +new-tab --working-directory=<requested> -e <command>` ran the command
@@ -245,7 +295,9 @@ Picker placements:
 
 Cursor placement measures the actual GTK input insertion point, including icon, border, and padding. It captures the terminal caret when opening, prefers below it, flips above when needed, and shifts horizontally to remain inside the pane. Pane boundaries take priority over exact alignment. Filtering retains the horizontal anchor. An off-screen terminal caret falls back to centered placement.
 
-The same picker widget powers internal session switching. Nushell examples and a Ctrl+X test binding were provided; the user's binding mode is `helix_insert`.
+Session switching and management now use a dedicated window-owned overlay.
+External picker IPC retains its reusable pane-local widget. Nushell examples
+and a Ctrl+X test binding were provided; the user's binding mode is `helix_insert`.
 
 ### Reliability and packaging
 
@@ -278,7 +330,7 @@ There is no unfinished implementation from the approved picker plan. The followi
 |---|---|---|
 | Near term | Nushell picker module | Reusable request construction, result parsing, cancellation handling, and convenient commands without embedding JSON in every binding. |
 | Near term | Real project/worktree picker | Populate choices from actual directories or worktrees and change the current shell directory after selection. Replace the test binding with a useful workflow. |
-| Near term | Keyboard session access | A direct Ghostty shortcut for the existing session picker, followed by previous-session switching. |
+| Near term | Previous-session switching | Return directly to the previously active session; keyboard access to the picker is implemented. |
 | Next | Read-only discovery IPC | Structured queries for sessions, windows, tabs, and panes, with explicit distinctions between saved and live identities. |
 | Next | Session CLI | List, open, and focus sessions from shells and launchers, with useful structured responses. |
 | Next | Optional fuzzy filtering | Match highlighting and ranking for path-heavy lists, while preserving existing request behavior by default. |
@@ -315,41 +367,52 @@ A later stage could float an existing pane and dock it again while preserving it
 
 These record the user's ideas for discussion, not a priority order. The Quiet rail chrome and live theme picker were subsequently approved for implementation and are described above; the remaining items are not an approved implementation plan.
 
-- **`+new-split` CLI action:** Add a shell-invoked action for opening a split.
-- **`+new-tab` with a working directory and command:** This already exists, but the user has not been able to get it working reliably. Investigate its behavior and clarify which environment it inherits.
-- **Session startup and keyboard access:** Allow saving sessions without automatically restoring the last sessions at startup. Bind the session picker to Alt+Space.
-- **Floating session manager:** Show the session manager inside the Ghostty window as a floating overlay/dialog instead of opening a separate OS window.
+- **`+new-split` CLI action:** Deferred at the user's request.
+- **`+new-tab` with a working directory and command:** Directory precedence is fixed and the environment behavior is documented above.
+- **Session startup and keyboard access:** The user prefers keeping automatic startup restoration. Keyboard access uses `switch_session`, with Alt+Space in the user's configuration.
+- **Floating session manager:** Merged with session switching into one searchable, window-owned floating libadwaita dialog with Enter, Ctrl+A, Ctrl+R, and Ctrl+K shortcuts; the user approved the merged UI. Extended lifecycle validation is not claimed.
 - **Random haiku session names:** Give new sessions generated, readable names, with manual renaming still available.
 - **Wider compact tabs or a title/tab bar redesign:** Explore wider tabs in compact mode, or redesign the combined title/tab bar to improve its appearance.
 - **Lua VM:** Explore embedded Lua for scripting, potentially including replacement of the current INI-style configuration system. No scripting API or configuration migration approach has been selected. Revisit native keybindings that create tabs with a working directory, title, and command during this exploration; the user prefers deferring this capability rather than extending the current `new_tab` binding syntax now. The existing CLI can be invoked through Nushell or compositor shortcuts in the meantime.
 - **Optional titlebar time/status:** Add an option to display the time in the titlebar. Consider richer configurable status content, potentially driven by Lua.
 - **UI chrome themed from the active terminal palette:** Allow the titlebar, tab rail, session selector, menus, and other chrome to derive colors from the current ANSI/terminal theme instead of fixed colors. Explore background/foreground and palette-based accents, readable contrast for text and controls, and live updates when the theme changes. How to choose the chrome palette when panes use different themes remains a design question.
-- **Live theme picker (initial implementation):** Browse installed themes with live previews across the current window's terminals and chrome. Enter retains the choice for that window; Escape restores its previous appearance. The first version does not save config. See `src/apprt/gtk/THEME_PICKER_PLAN.md` for the implementation sequence, window-isolation prerequisite, precedence rules, and validation criteria. The implementation is uncommitted and the user approved the desktop trial on 2026-10-22.
+- **Live theme picker (initial implementation):** Implemented and committed. Browse installed themes with live previews across the current window's terminals and chrome. Enter retains the choice for that window; Escape restores its previous appearance. The first version does not save config. See `src/apprt/gtk/THEME_PICKER_PLAN.md` for appearance isolation, runtime scope, and precedence rules. The user approved the desktop trial on 2026-10-22.
 
 ## Commit checkpoints
 
-These hashes identify the local checkpoints reviewed when this document was written. jj amendments or rebases can change hashes.
+Use jj change IDs below: they survive the timestamp rewrites that changed Git
+commit hashes. Only `main` and `folie` remain as local bookmarks. The fork's
+16 original author dates were randomized in order from 19:30 to 21:42 CEST on
+2026-10-22. Committer dates record subsequent rewrites; `jj log` displays those
+by default. Do not interpret its relative times as the randomized author dates.
+Nothing was pushed during this work.
 
-| Commit | Change |
+| jj change | Change |
 |---|---|
-| `152685b7c890` | Fix propagated GStreamer package paths. |
-| `3a31bc9aff03` | Named session restoration. |
-| `74c913a6addd` | Reuse the Zig dependency cache across revisions. |
-| `03c19cd11e1d` | Restore session contents from binary snapshots. |
-| `2f9bc33d3a7c` | Compact pill tab style. |
-| `7b62bf000287` | Simplify compact tab controls. |
-| `ff6f5c1a752e` | Refine compact tab typography. |
-| `df926be05043` | Toolbar visibility controls. |
-| `b81c1862ab86` | Keyboard pane movement and swapping. |
-| `3791de5738b9` | Session archiving and deletion. |
-| `3c61369a6a2d` | Session manager window. |
-| `88b3075cea82` | Pane-scoped picker IPC, cursor placement, tab refinements, and shutdown cleanup. |
+| `xsnurzul` | nix: fix propagated GStreamer package paths |
+| `lrmxuzkt` | gtk: add named session restoration |
+| `tynpprsv` | nix: reuse the Zig dependency cache across revisions |
+| `spzxqnnx` | gtk: restore session contents from binary snapshots |
+| `xsvumyqv` | gtk: add a compact pill tab style |
+| `qrukzomu` | gtk: simplify compact tab controls |
+| `yuxuoutk` | gtk: refine compact tab typography |
+| `woolputm` | gtk: add toolbar visibility controls |
+| `owrurkzp` | gtk: add keyboard pane movement and swapping |
+| `zsmykktp` | gtk: add session archiving and deletion |
+| `ryqquyks` | gtk: add a session manager window |
+| `npkvkqtw` | gtk: add pane-scoped picker IPC and cursor-anchored selection |
+| `mnnxprwv` | gtk: honor CLI working directories for new tabs |
+| `sqlxrquw` | gtk: derive UI chrome colors from the terminal theme |
+| `ptqyknxn` | gtk: add a window-scoped live theme picker |
+| `yksnvuzw` | docs: record fork roadmap and local development workflow |
+| `ukknpltx` | docs: use system fontconfig for local Linux builds |
+| `xvyxyotw` | Unified searchable session overlay, keyboard actions, and handoff docs. |
 
 ## Related implementation documentation
 
 - `src/apprt/gtk/SESSION_RESTORE.md`: configuration, session semantics, storage, snapshots, pane actions, and validation.
 - `src/apprt/gtk/PICKER_IPC.md`: request/response schema, endpoint targeting, lifecycle, limits, D-Bus methods, and Nushell usage.
-- `src/apprt/gtk/THEME_PICKER_PLAN.md`: planned live theme picker, appearance isolation, runtime scope, and validation criteria.
+- `src/apprt/gtk/THEME_PICKER_PLAN.md`: implemented live theme picker and reference plan, appearance isolation, runtime scope, and validation criteria.
 - `test/gtk-picker.py`: portable isolated GTK picker integration checks.
 
 Keep this document updated at feature checkpoints. Move roadmap entries into completed features only after implementation and validation; distinguish newly approved work from speculative ideas.

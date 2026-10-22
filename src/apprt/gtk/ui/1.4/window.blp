@@ -104,11 +104,11 @@ template $GhosttyWindow: Adw.ApplicationWindow {
             visible: bind $titlebar_style_is_tabs(template.titlebar-style) as <bool>;
           }
 
-          Gtk.MenuButton session_button {
+          Gtk.Button session_button {
             styles ["flat", "session-selector"]
             visible: bind template.session-enabled;
-            notify::active => $session_menu_opened();
-            menu-model: session_menu;
+            action-name: "win.switch-session";
+            focus-on-click: false;
             tooltip-text: bind template.session-name;
             can-focus: false;
 
@@ -229,17 +229,6 @@ menu split_menu {
   item {
     label: _("Split Right");
     action: "win.split-right";
-  }
-}
-
-menu session_menu {
-  item {
-    label: _("New Session");
-    action: "win.new-session";
-  }
-  item {
-    label: _("Rename Session…");
-    action: "win.rename-session";
   }
 }
 

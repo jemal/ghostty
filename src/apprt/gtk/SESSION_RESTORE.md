@@ -4,8 +4,8 @@ Enable with `window-save-state = always`. GTK leaves this disabled for
 `default` and `never`. Disabling it retains existing saved sessions.
 
 Each session represents one window's tabs and split trees. The session name
-appears at the start of the tab bar. Its menu creates a session in a new
-window, renames the current session, or reopens a saved session. Selecting a
+appears at the start of the tab bar. Clicking it opens the Sessions overlay,
+where you can create, rename, reopen, archive, or delete sessions. Opening a
 session that is already open focuses its window without creating a copy.
 
 The manifest preserves tab order, custom window/tab/pane titles, split
@@ -16,34 +16,47 @@ Primary-screen output, styles, hyperlinks, images, and scrollback are saved
 in binary snapshots. Shells start afresh; running commands and alternate-screen
 programs are not resumed.
 
-Closed sessions remain available in the menu. Startup restores the sessions
+Closed sessions remain available in the Sessions overlay. Startup restores the sessions
 in the last active-session index. Closing the last window retains that
 session for the next activation, including when a hidden quick terminal keeps
 the application running. Quick terminals are not persisted.
 
-Choose **Switch Session…** for a searchable session picker. Selecting an open
-session focuses its existing window; selecting a saved session restores it.
-This uses the same pane-local widget as the [native picker API](PICKER_IPC.md).
+Click the session name in the tab bar or choose **Sessions…** in the command
+palette to open the searchable floating overlay inside the current window.
+The GTK-only `switch_session` action opens the same overlay:
 
-Choose **Manage Sessions…** in the session menu to open the Sessions window.
-It lists saved sessions with Open, Saved, or Archived status, alongside Open
-(or Focus), Rename, Archive, and Delete actions. **Show archived sessions**
-includes the archive in this list. Unarchive returns a session to the normal
-picker without opening it; Open also unarchives an archived session.
+```ini
+keybind = alt+space=switch_session
+```
 
-For open sessions, **Archive and Close…** saves the latest layout and terminal
-contents, uses the usual running-process close confirmation, and archives the
-session only after close is accepted. Canceling keeps the window open and the
-session unarchived. An archive failure also keeps the terminal window open.
-The manager stays available even after archiving the only terminal window, so
-you can create a new session or reopen an archived one without a temporary
-terminal window. Closing the manager resumes normal quit-after-last-window
-behavior, including a configured delay.
+This shortcut is configured in the user's Home Manager source, including the
+Vim key table; no default shortcut is imposed by the fork. Automatic startup
+restoration is unchanged.
 
-Deletion asks for confirmation and permanently removes the saved layout and
-all snapshot generations belonging to that session. Delete is disabled for
-open sessions; Archive and Close is the explicit way to stop a running session.
-The app finishes pending saves before modifying storage.
+Type to filter session names (Unicode case-insensitive substring search).
+Up/Down or Tab/Shift+Tab select a result while keeping search focused. Selection
+survives refreshes and follows a neighboring row after removal. Rows show
+Current, Open, Saved, or Archived status. **Show archived sessions** includes
+the archive, and **New Session** creates a fresh session.
+
+| Shortcut | Selected-session action |
+|---|---|
+| Enter | Focus an open session, or restore a saved session. Archived sessions are unarchived before opening. |
+| Ctrl+A | Archive; for an open session, save and close with the normal running-process confirmation. Unarchive an archived session. |
+| Ctrl+R | Rename. |
+| Ctrl+K | Ask to permanently delete a closed saved session and its snapshots. Open sessions must be closed first. |
+| Escape | Dismiss the overlay. |
+
+Archiving retains the saved layout and terminal snapshots. Canceling a close
+confirmation or encountering an archive failure keeps the session open and
+unarchived. Pending saves finish before storage changes.
+
+The overlay belongs to its host window, so closing or archiving that window
+also closes the overlay. Creating or opening a session dismisses it and shows
+the destination window. Normal quit-after-last-window behavior still applies.
+There is one overlay per window; the former separate picker and manager paths
+both lead to it. The external [native picker API](PICKER_IPC.md) remains separate
+and does not expose session-management shortcuts.
 
 ## Live theme picker
 

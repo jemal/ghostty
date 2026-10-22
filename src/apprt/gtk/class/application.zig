@@ -603,10 +603,6 @@ pub const Application = extern struct {
 
                 // If the quit timer has expired, quit.
                 if (priv.quit_timer == .expired) {
-                    if (self.hasSessionManager()) {
-                        self.stopQuitTimer();
-                        break :q false;
-                    }
                     log.debug("must_quit due to quit timer expired", .{});
                     break :q true;
                 }
@@ -703,7 +699,7 @@ pub const Application = extern struct {
                 // gtk.Window as a property that we don't own and it later
                 // tries to free on its own. I think this is probably a bug in
                 // the fcitx ime widget but still, we don't want a double free!
-                if (gobject.ext.isA(window, Window) or gobject.ext.isA(window, @import("session_manager.zig").SessionManager)) {
+                if (gobject.ext.isA(window, Window)) {
                     window.destroy();
                 }
             }
@@ -884,7 +880,6 @@ pub const Application = extern struct {
 
         // Cancel any previous timer.
         self.stopQuitTimer();
-        if (self.hasSessionManager()) return;
 
         // This is a no-op unless we are configured to quit after last window is closed.
         if (!config.@"quit-after-last-window-closed") return;
@@ -921,20 +916,6 @@ pub const Application = extern struct {
                 priv.quit_timer = .off;
             },
         }
-    }
-
-    fn hasSessionManager(self: *Self) bool {
-        var current: ?*glib.List = self.as(gtk.Application).getWindows();
-        while (current) |link| : (current = link.f_next) {
-            const ptr: *gtk.Window = @ptrCast(@alignCast(link.f_data orelse continue));
-            if (gobject.ext.cast(@import("session_manager.zig").SessionManager, ptr)) |manager|
-                if (!manager.isClosing()) return true;
-        }
-        return false;
-    }
-
-    pub fn sessionManagerClosed(self: *Self) void {
-        if (self.private().core_app.surfaces.items.len == 0) self.startQuitTimer();
     }
 
     fn loadRuntimeCss(self: *Self) (Allocator.Error || std.Io.Writer.Error)!void {
