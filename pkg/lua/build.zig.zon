@@ -1,0 +1,16 @@
+.{
+    .name = .lua,
+    .version = "5.4.8",
+    .fingerprint = 0xd671372b28feddea,
+    .paths = .{""},
+    .dependencies = .{
+        // lua.org
+        .lua = .{
+            .url = "https://www.lua.org/ftp/lua-5.4.8.tar.gz",
+            .hash = "N-V-__8AAKEzFAAA695b9LXBhUSVK5MAV_VKSm1mEj3Acbze",
+            .lazy = true,
+        },
+
+        .translate_c = .{ .path = "../translate-c" },
+    },
+}

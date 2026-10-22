@@ -49,6 +49,10 @@ pub fn pickTheme(self: *Self) bool {
     return true;
 }
 
+pub fn runLua(self: *Self, name: []const u8) bool {
+    return Application.default().runLua(name, self.core().id);
+}
+
 pub fn toggleToolbar(self: *Self) bool {
     const window = @import("ext.zig").getAncestor(
         @import("class/window.zig").Window,

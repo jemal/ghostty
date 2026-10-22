@@ -49,6 +49,7 @@ const media = @import("../media.zig");
 const Overrides = @import("Overrides.zig");
 const sessions = @import("../session.zig");
 const SessionSave = @import("../session_save.zig");
+const lua = @import("../lua.zig");
 
 const log = std.log.scoped(.gtk_ghostty_application);
 
@@ -182,6 +183,10 @@ pub const Application = extern struct {
         /// The configuration for the application.
         config: *Config,
 
+        /// The Lua runtime that `init.lua` set up with the current
+        /// configuration. Null when there is no `init.lua`.
+        lua: ?*lua.Runtime = null,
+
         /// State and logic for the underlying windowing protocol.
         winproto: winprotopkg.App,
 
@@ -279,8 +284,8 @@ pub const Application = extern struct {
         try gtk_version.logVersion();
         try adw_version.logVersion();
 
-        // Load our configuration.
-        var config = CoreConfig.load(alloc) catch |err| err: {
+        // Load our configuration, together with init.lua.
+        const loaded: lua.Loaded = lua.loadConfig(alloc) catch |err| err: {
             // If we fail to load the configuration, then we should log
             // the error in the diagnostics so it can be shown to the user.
             // We can still load a default which only fails for OOM, allowing
@@ -292,9 +297,11 @@ pub const Application = extern struct {
                 .{err},
             );
 
-            break :err def;
+            break :err .{ .config = def, .runtime = null };
         };
+        var config = loaded.config;
         defer config.deinit();
+        errdefer if (loaded.runtime) |runtime| runtime.destroy();
 
         // Set the old language,
         const saved_language: ?[:0]const u8 = saved_language: {
@@ -423,6 +430,7 @@ pub const Application = extern struct {
             .rt_app = rt_app,
             .core_app = core_app,
             .config = config_obj,
+            .lua = loaded.runtime,
             .winproto = wp,
             .css_provider = css_provider,
             .custom_css_providers = .empty,
@@ -465,6 +473,7 @@ pub const Application = extern struct {
         const alloc = self.allocator();
         const priv: *Private = self.private();
         priv.config.unref();
+        if (priv.lua) |runtime| lua.retire(runtime);
         priv.winproto.deinit();
         priv.open_uri.deinit();
         priv.global_shortcuts.unref();
@@ -856,6 +865,13 @@ pub const Application = extern struct {
     /// not a reference-counted type so you should not store this.
     pub fn core(self: *Self) *CoreApp {
         return self.private().core_app;
+    }
+
+    /// Run the Lua action `name` for the surface with the runtime ID
+    /// `surface_id`. Returns false if there is no such action.
+    pub fn runLua(self: *Self, name: []const u8, surface_id: u64) bool {
+        const runtime = self.private().lua orelse return false;
+        return runtime.run(name, surface_id);
     }
 
     /// Returns the apprt application associated with this application.
@@ -2974,11 +2990,19 @@ const Action = struct {
                 break :config self.private().config.ref();
             }
 
-            // Hard reload, load a new config completely.
+            // Hard reload, load a new config completely. This also loads
+            // init.lua again into a new Lua runtime.
             const alloc = self.allocator();
-            var config = try CoreConfig.load(alloc);
+            const loaded = try lua.loadConfig(alloc);
+            var config = loaded.config;
             defer config.deinit();
-            break :config try .new(alloc, &config);
+            errdefer if (loaded.runtime) |runtime| runtime.destroy();
+            const obj: *Config = try .new(alloc, &config);
+
+            const priv = self.private();
+            if (priv.lua) |runtime| lua.retire(runtime);
+            priv.lua = loaded.runtime;
+            break :config obj;
         };
         defer config.unref();
 

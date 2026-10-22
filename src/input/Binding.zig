@@ -608,6 +608,12 @@ pub const Action = union(enum) {
     /// Preview installed themes in the current window (GTK only).
     pick_theme,
 
+    /// Run an action that `init.lua` in the Ghostty config directory
+    /// defines with `ghostty.action`. The parameter is the action name,
+    /// for example `lua:cargo_targets`. The binding is not performed if
+    /// no Lua action has that name (GTK only).
+    lua: []const u8,
+
     /// Change the title of the current focused surface via a pop-up prompt.
     prompt_surface_title,
 
@@ -1480,6 +1486,7 @@ pub const Action = union(enum) {
             .toggle_toolbar,
             .pick_theme,
             .switch_session,
+            .lua,
             .new_split,
             .goto_split,
             .move_split,

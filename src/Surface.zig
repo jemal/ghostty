@@ -5636,6 +5636,12 @@ pub fn performBindingAction(self: *Surface, action: input.Binding.Action) !bool 
             return false;
         },
 
+        .lua => |name| {
+            if (comptime @hasDecl(apprt.Surface, "runLua"))
+                return self.rt_surface.runLua(name);
+            return false;
+        },
+
         .pick_theme => {
             if (comptime @hasDecl(apprt.Surface, "pickTheme"))
                 return self.rt_surface.pickTheme();

@@ -254,8 +254,9 @@ produced actual directory results and reproduced the bug.
 The GTK surface now skips parent-directory inheritance when the request
 supplies a directory, and applies the explicit override after any inherited
 or restored `pwd`. Normal keyboard-created tabs still inherit as configured.
-The ReleaseFast build passed and is installed in `~/.local`; post-restart
-desktop confirmation is pending. Formatting and diff checks also passed.
+The ReleaseFast build passed and is installed in `~/.local`. Formatting and
+diff checks also passed. The user confirmed on 2026-10-22 that `+new-tab`
+works on the normal desktop after a restart.
 
 A caller-only environment marker was absent in the new tab, confirming the
 existing IPC semantics: new tabs inherit the running Ghostty process's
@@ -265,6 +266,24 @@ copying the invoking shell's environment. This behavior was not changed.
 
 See `src/apprt/gtk/SESSION_RESTORE.md` for usage
 and `src/apprt/gtk/THEME_PICKER_PLAN.md` for design and future validation cases.
+
+### Lua scripting (phase 1)
+
+`$XDG_CONFIG_HOME/ghostty/init.lua` can define actions and keybinds. It adds
+to the INI config and does not replace it. The model is the Rex Lua API.
+Phase 1 has `ghostty.action`, `ghostty.bind`, `ghostty.invoke`,
+`ghostty.toast` and `ghostty.log`, and a new `lua:<name>` binding action that
+INI keybinds can also use. Lua runs only on the GTK main thread, with time
+limits. Errors show as toasts or config diagnostics.
+
+Lua 5.4.8 is built from source (`pkg/lua`). The Nix dependency files were
+updated; `nix/zigCacheHash.nix` was not.
+
+Tests for the runtime and the config entries passed. The ReleaseFast build
+passed and is installed in `~/.local`. The user's desktop test passed on
+2026-10-22.
+Phases 2 to 4 (panes and splits, waiting with coroutines, events) are not
+started. See `src/apprt/gtk/LUA_PLAN.md`.
 
 ### Native picker and IPC
 
@@ -368,12 +387,12 @@ A later stage could float an existing pane and dock it again while preserving it
 These record the user's ideas for discussion, not a priority order. The Quiet rail chrome and live theme picker were subsequently approved for implementation and are described above; the remaining items are not an approved implementation plan.
 
 - **`+new-split` CLI action:** Deferred at the user's request.
-- **`+new-tab` with a working directory and command:** Directory precedence is fixed and the environment behavior is documented above.
+- **`+new-tab` with a working directory and command:** Directory precedence is fixed and confirmed by the user on the desktop. The environment behavior is documented above.
 - **Session startup and keyboard access:** The user prefers keeping automatic startup restoration. Keyboard access uses `switch_session`, with Alt+Space in the user's configuration.
 - **Floating session manager:** Merged with session switching into one searchable, window-owned floating libadwaita dialog with Enter, Ctrl+A, Ctrl+R, and Ctrl+K shortcuts; the user approved the merged UI. Extended lifecycle validation is not claimed.
 - **Random haiku session names:** Give new sessions generated, readable names, with manual renaming still available.
 - **Wider compact tabs or a title/tab bar redesign:** Explore wider tabs in compact mode, or redesign the combined title/tab bar to improve its appearance.
-- **Lua VM:** Explore embedded Lua for scripting, potentially including replacement of the current INI-style configuration system. No scripting API or configuration migration approach has been selected. Revisit native keybindings that create tabs with a working directory, title, and command during this exploration; the user prefers deferring this capability rather than extending the current `new_tab` binding syntax now. The existing CLI can be invoked through Nushell or compositor shortcuts in the meantime.
+- **Lua VM:** Phase 1 is implemented; see "Lua scripting (phase 1)" above and `src/apprt/gtk/LUA_PLAN.md`. The user decided not to replace the INI config. The original idea: explore embedded Lua for scripting, potentially including replacement of the current INI-style configuration system. No scripting API or configuration migration approach has been selected. Revisit native keybindings that create tabs with a working directory, title, and command during this exploration; the user prefers deferring this capability rather than extending the current `new_tab` binding syntax now. The existing CLI can be invoked through Nushell or compositor shortcuts in the meantime.
 - **Optional titlebar time/status:** Add an option to display the time in the titlebar. Consider richer configurable status content, potentially driven by Lua.
 - **UI chrome themed from the active terminal palette:** Allow the titlebar, tab rail, session selector, menus, and other chrome to derive colors from the current ANSI/terminal theme instead of fixed colors. Explore background/foreground and palette-based accents, readable contrast for text and controls, and live updates when the theme changes. How to choose the chrome palette when panes use different themes remains a design question.
 - **Live theme picker (initial implementation):** Implemented and committed. Browse installed themes with live previews across the current window's terminals and chrome. Enter retains the choice for that window; Escape restores its previous appearance. The first version does not save config. See `src/apprt/gtk/THEME_PICKER_PLAN.md` for appearance isolation, runtime scope, and precedence rules. The user approved the desktop trial on 2026-10-22.
@@ -407,12 +426,14 @@ Nothing was pushed during this work.
 | `yksnvuzw` | docs: record fork roadmap and local development workflow |
 | `ukknpltx` | docs: use system fontconfig for local Linux builds |
 | `xvyxyotw` | Unified searchable session overlay, keyboard actions, and handoff docs. |
+| `zpwtzozm` | gtk: add Lua scripting for actions and keybinds (phase 1) |
 
 ## Related implementation documentation
 
 - `src/apprt/gtk/SESSION_RESTORE.md`: configuration, session semantics, storage, snapshots, pane actions, and validation.
 - `src/apprt/gtk/PICKER_IPC.md`: request/response schema, endpoint targeting, lifecycle, limits, D-Bus methods, and Nushell usage.
 - `src/apprt/gtk/THEME_PICKER_PLAN.md`: implemented live theme picker and reference plan, appearance isolation, runtime scope, and validation criteria.
+- `src/apprt/gtk/LUA_PLAN.md`: Lua scripting API, the phase 1 state, and the plan for phases 2 to 4.
 - `test/gtk-picker.py`: portable isolated GTK picker integration checks.
 
 Keep this document updated at feature checkpoints. Move roadmap entries into completed features only after implementation and validation; distinguish newly approved work from speculative ideas.

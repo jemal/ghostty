@@ -779,6 +779,7 @@ fn actionCommands(action: Action.Key) []const Command {
         // common values that users tend to use.
         .csi,
         .esc,
+        .lua,
         .cursor_key,
         .set_font_size,
         .set_surface_title,

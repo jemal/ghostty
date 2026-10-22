@@ -710,6 +710,14 @@ fn addGtk(
     const target = step.root_module.resolved_target.?;
     const optimize = step.root_module.optimize.?;
 
+    // Lua scripting is only implemented in the GTK app.
+    if (b.lazyDependency("lua", .{
+        .target = target,
+        .optimize = optimize,
+    })) |lua_dep| {
+        step.root_module.addImport("lua", lua_dep.module("lua"));
+    }
+
     const gobject = b.lazyDependency("gobject", .{
         .target = target,
         .optimize = optimize,

@@ -4105,6 +4105,15 @@ pub fn deinit(self: *Config) void {
 ///   5. Recursively defined configuration files
 ///
 pub fn load(alloc_gpa: Allocator) !Config {
+    return loadWithExtra(alloc_gpa, &.{});
+}
+
+/// Load the configuration like `load`, then parse `extra` after all
+/// configuration files. Each entry is a CLI-style argument such as
+/// `--keybind=super+r=lua:name`. The GTK app uses this to add keybinds and
+/// command palette entries that `init.lua` defines. The entries are kept as
+/// replay steps, so they stay after a conditional (light/dark) reload.
+pub fn loadWithExtra(alloc_gpa: Allocator, extra: []const []const u8) !Config {
     var result = try default(alloc_gpa);
     errdefer result.deinit();
 
@@ -4116,6 +4125,25 @@ pub fn load(alloc_gpa: Allocator) !Config {
 
     // Parse the config files that were added from our file and CLI args.
     try result.loadRecursiveFiles(alloc_gpa);
+
+    // Parse the extra entries. Everything after "-e" in the replay steps
+    // is the initial command, so the entries must go before it.
+    if (extra.len > 0) {
+        const suffix: []const Replay.Step = suffix: {
+            for (result._replay_steps.items, 0..) |step, i| if (step == .@"-e") {
+                const suffix = try alloc_gpa.dupe(Replay.Step, result._replay_steps.items[i..]);
+                result._replay_steps.shrinkRetainingCapacity(i);
+                break :suffix suffix;
+            };
+            break :suffix &.{};
+        };
+        defer alloc_gpa.free(suffix);
+
+        var it = cli.args.sliceIterator(extra);
+        try result.loadIter(alloc_gpa, &it);
+        try result._replay_steps.appendSlice(result._arena.?.allocator(), suffix);
+    }
+
     try result.finalize();
 
     return result;

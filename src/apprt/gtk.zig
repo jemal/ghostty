@@ -14,6 +14,7 @@ test {
     _ = @import("gtk/desktop_notifications.zig");
     _ = @import("gtk/ext.zig");
     _ = @import("gtk/key.zig");
+    _ = @import("gtk/lua/Runtime.zig");
     _ = @import("gtk/portal.zig");
     _ = @import("gtk/scale.zig");
     _ = @import("gtk/session.zig");

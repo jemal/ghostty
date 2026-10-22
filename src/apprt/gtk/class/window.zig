@@ -877,6 +877,12 @@ pub const Window = extern struct {
         self.private().toast_overlay.addToast(toast);
     }
 
+    /// Show a message from a Lua script (`ghostty.toast`) or a Lua error.
+    /// Lua scripts are not widgets, so they cannot use signals for this.
+    pub fn showLuaToast(self: *Self, text: [:0]const u8) void {
+        self.addToast(text.ptr);
+    }
+
     fn connectSurfaceHandlers(
         self: *Self,
         tree: *const Surface.Tree,

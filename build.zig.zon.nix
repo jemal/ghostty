@@ -122,6 +122,11 @@
       url = "https://deps.files.ghostty.org/libxml2-2.11.5.tar.gz";
       hash = "sha256-2SEzGhMeIHoHe9EKV6LgPLBXdmrxWWgnLYwUMZFWxNQ=";
     };
+    "N-V-__8AAKEzFAAA695b9LXBhUSVK5MAV_VKSm1mEj3Acbze" = fetchzip {
+      name = "lua";
+      url = "https://www.lua.org/ftp/lua-5.4.8.tar.gz";
+      hash = "sha256-6TMsVp2D3WtvnwyhvwodjQH3kvTXz1rSMWwiHazvKys=";
+    };
     "N-V-__8AAMVLTABmYkLqhZPLXnMl-KyN38R8UVYqGrxqO26s" = fetchurl {
       url = "https://deps.files.ghostty.org/NerdFontsSymbolsOnly-3.4.0.tar.gz";
       hash = "sha256-EWTRuVbUveJI17LwmYxDzJT1ICQxoVZKeTiVsec7DQQ=";
