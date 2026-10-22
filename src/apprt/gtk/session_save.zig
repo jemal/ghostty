@@ -57,7 +57,7 @@ pub fn create(app: *Application, index_hash: ?u64) !*Self {
     while (current) |link| : (current = link.f_next) {
         const ptr: *gtk.Window = @ptrCast(@alignCast(link.f_data orelse continue));
         const window = gobject.ext.cast(Window, ptr) orelse continue;
-        if (window.isQuickTerminal() or window.getTabView().getNPages() == 0) continue;
+        if (window.isQuickTerminal() or window.isSessionArchived() or window.getTabView().getNPages() == 0) continue;
         const manifest = try window.captureSession(arena);
         if (manifest.tabs.len == 0) continue;
         try manifest.validate();

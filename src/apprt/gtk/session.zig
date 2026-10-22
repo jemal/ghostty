@@ -190,6 +190,19 @@ pub fn listArchived(dir: std.Io.Dir, io: std.Io, alloc: Allocator) ![]Entry {
     return list(archive, io, alloc);
 }
 
+pub fn rename(dir: std.Io.Dir, io: std.Io, alloc: Allocator, id: u64, archived: bool, name: [:0]const u8) !void {
+    if (!validName(name)) return error.InvalidSession;
+    const source = if (archived) try dir.openDir(io, "archived", .{}) else dir;
+    defer if (archived) source.close(io);
+    var manifest = try load(source, io, alloc, id);
+    defer manifest.deinit();
+    manifest.value.name = name;
+    const bytes = try serialize(alloc, manifest.value);
+    defer alloc.free(bytes);
+    var buf: [32]u8 = undefined;
+    try write(source, io, try fileName(&buf, id), bytes);
+}
+
 /// Remove the manifest first so a partial snapshot cleanup never leaves a
 /// restorable session referring to deleted contents. Retrying is harmless.
 pub fn delete(dir: std.Io.Dir, io: std.Io, id: u64) !void {
@@ -334,6 +347,9 @@ test "session archive preserves contents and deletion stays within its ID" {
     try write(tmp.dir, testing.io, "active.json", "index");
     try testing.expectEqual(@as(usize, 0), (try listArchived(tmp.dir, testing.io, alloc)).len);
     try setArchived(tmp.dir, testing.io, 1, true);
+    try rename(tmp.dir, testing.io, testing.allocator, 1, true, "Archived Work");
+    try testing.expectEqualStrings("Archived Work", (try listArchived(tmp.dir, testing.io, alloc))[0].name);
+    try rename(tmp.dir, testing.io, testing.allocator, 1, true, "Work");
     try testing.expectEqual(@as(usize, 0), (try list(tmp.dir, testing.io, alloc)).len);
     const entries = try listArchived(tmp.dir, testing.io, alloc);
     try testing.expectEqual(@as(usize, 1), entries.len);
@@ -348,6 +364,12 @@ test "session archive preserves contents and deletion stays within its ID" {
     const restored = try load(tmp.dir, testing.io, testing.allocator, 1);
     defer restored.deinit();
     try testing.expectEqualDeep(value, restored.value);
+    try rename(tmp.dir, testing.io, testing.allocator, 1, false, "Renamed Work");
+    const renamed = try load(tmp.dir, testing.io, testing.allocator, 1);
+    defer renamed.deinit();
+    try testing.expectEqualStrings("Renamed Work", renamed.value.name);
+    try testing.expectEqualDeep(value.tabs, renamed.value.tabs);
+    try testing.expectError(error.InvalidSession, rename(tmp.dir, testing.io, testing.allocator, 1, false, "bad\nname"));
     try testing.expectEqual(@as(usize, 0), (try listArchived(tmp.dir, testing.io, alloc)).len);
     try setArchived(tmp.dir, testing.io, 1, true);
     try delete(tmp.dir, testing.io, 1);

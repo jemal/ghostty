@@ -329,6 +329,8 @@ pub const Window = extern struct {
         session_id: u64 = 0,
         session_name: ?[:0]const u8 = null,
         session_hash: ?u64 = null,
+        archive_on_close: bool = false,
+        session_archived: bool = false,
         session_menu: ?*gio.Menu = null,
         toolbar_visible_override: ?bool = null,
 
@@ -445,9 +447,7 @@ pub const Window = extern struct {
             .init("new-session", actionNewSession, null),
             .init("rename-session", actionRenameSession, null),
             .init("open-session", actionOpenSession, t_variant_type),
-            .init("archive-session", actionArchiveSession, t_variant_type),
-            .init("unarchive-session", actionUnarchiveSession, t_variant_type),
-            .init("delete-session", actionDeleteSession, t_variant_type),
+            .init("manage-sessions", actionManageSessions, null),
             .init("about", actionAbout, null),
             .init("close", actionClose, null),
             .init("close-tab", actionCloseTab, s_variant_type),
@@ -1186,128 +1186,45 @@ pub const Window = extern struct {
         const entries = sessions.list(dir, global.io(), arena.allocator()) catch return;
         const saved = gio.Menu.new();
         defer saved.unref();
-        const manage = gio.Menu.new();
-        defer manage.unref();
         for (entries) |entry| {
             const item = gio.MenuItem.new(entry.name, null);
             defer item.unref();
             item.setActionAndTargetValue("win.open-session", glib.Variant.newUint64(entry.id));
             saved.appendItem(item);
-            if (app.sessionWindow(entry.id) == null) {
-                const actions = gio.Menu.new();
-                defer actions.unref();
-                appendSessionAction(actions, i18n._("Archive Session"), "win.archive-session", entry.id);
-                appendSessionAction(actions, i18n._("Delete Session…"), "win.delete-session", entry.id);
-                manage.appendSubmenu(entry.name, actions.as(gio.MenuModel));
-            }
         }
         menu.appendSection(i18n._("Sessions"), saved.as(gio.MenuModel));
-        if (manage.as(gio.MenuModel).getNItems() > 0)
-            menu.appendSubmenu(i18n._("Manage Closed Sessions"), manage.as(gio.MenuModel));
-
-        const archived_entries = sessions.listArchived(dir, global.io(), arena.allocator()) catch return;
-        const archived = gio.Menu.new();
-        defer archived.unref();
-        for (archived_entries) |entry| {
-            const actions = gio.Menu.new();
-            defer actions.unref();
-            appendSessionAction(actions, i18n._("Unarchive Session"), "win.unarchive-session", entry.id);
-            appendSessionAction(actions, i18n._("Delete Session…"), "win.delete-session", entry.id);
-            archived.appendSubmenu(entry.name, actions.as(gio.MenuModel));
-        }
-        if (archived.as(gio.MenuModel).getNItems() > 0)
-            menu.appendSubmenu(i18n._("Archived Sessions"), archived.as(gio.MenuModel));
+        menu.append(i18n._("Manage Sessions…"), "win.manage-sessions");
     }
 
-    fn appendSessionAction(menu: *gio.Menu, label: [*:0]const u8, action: [*:0]const u8, id: u64) void {
-        const item = gio.MenuItem.new(label, null);
-        defer item.unref();
-        item.setActionAndTargetValue(action, glib.Variant.newUint64(id));
-        menu.appendItem(item);
+    fn actionManageSessions(_: *gio.SimpleAction, _: ?*glib.Variant, _: *Self) callconv(.c) void {
+        @import("session_manager.zig").SessionManager.present();
     }
 
-    fn actionArchiveSession(_: *gio.SimpleAction, param: ?*glib.Variant, self: *Self) callconv(.c) void {
-        self.setSessionArchived((param orelse return).getUint64(), true);
+    pub fn renameSession(self: *Self, name: []const u8) void {
+        self.setSessionName(name);
+        Application.default().saveSessions();
     }
 
-    fn actionUnarchiveSession(_: *gio.SimpleAction, param: ?*glib.Variant, self: *Self) callconv(.c) void {
-        self.setSessionArchived((param orelse return).getUint64(), false);
+    pub fn isSessionArchived(self: *Self) bool {
+        return self.private().session_archived;
     }
 
-    fn setSessionArchived(self: *Self, id: u64, archived: bool) void {
-        Application.default().archiveSession(id, archived) catch |err| {
-            log.warn("unable to change session archive state err={}", .{err});
-            self.addToast(if (err == error.SessionOpen)
-                i18n._("Close the session window before archiving or deleting it.")
-            else
-                i18n._("Unable to change this session's archive state."));
-            return;
-        };
-        self.addToast(if (archived) i18n._("Session archived.") else i18n._("Session unarchived."));
+    pub fn markSessionArchived(self: *Self) void {
+        self.private().session_archived = true;
     }
 
-    const DeleteSessionRequest = struct { window: *Self, id: u64 };
-
-    fn actionDeleteSession(_: *gio.SimpleAction, param: ?*glib.Variant, self: *Self) callconv(.c) void {
-        const id = (param orelse return).getUint64();
-        const app = Application.default();
-        if (!app.sessionsEnabled()) return;
-        if (app.sessionWindow(id) != null) {
-            self.addToast(i18n._("Close the session window before archiving or deleting it."));
-            return;
-        }
-        const alloc = app.allocator();
-        var arena: std.heap.ArenaAllocator = .init(alloc);
-        defer arena.deinit();
-        const dir = app.sessionDir() catch return;
-        defer dir.close(global.io());
-        const entries = sessions.list(dir, global.io(), arena.allocator()) catch return;
-        const archived = sessions.listArchived(dir, global.io(), arena.allocator()) catch return;
-        var name: ?[:0]const u8 = null;
-        for (entries) |entry| if (entry.id == id) {
-            name = entry.name;
-            break;
-        };
-        for (archived) |entry| if (entry.id == id) {
-            name = entry.name;
-            break;
-        };
-        const body = arena.allocator().printSentinel("{s}\n\n{s}", .{
-            name orelse return,
-            i18n._("Permanently delete this saved layout and all of its terminal snapshots? This cannot be undone."),
-        }, 0) catch return;
-        const data = alloc.create(DeleteSessionRequest) catch return;
-        data.* = .{ .window = self, .id = id };
-        _ = self.ref();
-        const dialog = adw.AlertDialog.new(i18n._("Delete Saved Session?"), body);
-        dialog.setBodyUseMarkup(0);
-        dialog.addResponse("cancel", i18n._("Cancel"));
-        dialog.addResponse("delete", i18n._("Delete"));
-        dialog.setResponseAppearance("delete", .destructive);
-        dialog.setDefaultResponse("cancel");
-        dialog.setCloseResponse("cancel");
-        dialog.choose(self.as(gtk.Widget), null, sessionDeleteReady, data);
-    }
-
-    fn sessionDeleteReady(source: ?*gobject.Object, result: *gio.AsyncResult, ud: ?*anyopaque) callconv(.c) void {
-        const data: *DeleteSessionRequest = @ptrCast(@alignCast(ud orelse return));
-        const self = data.window;
-        defer self.unref();
-        defer Application.default().allocator().destroy(data);
-        const dialog = gobject.ext.cast(adw.AlertDialog, source orelse return) orelse return;
-        if (std.mem.orderZ(u8, dialog.chooseFinish(result), "delete") != .eq) return;
-        Application.default().deleteSession(data.id) catch |err| {
-            log.warn("unable to delete session err={}", .{err});
-            self.addToast(if (err == error.SessionOpen)
-                i18n._("Close the session window before archiving or deleting it.")
-            else
-                i18n._("Unable to delete this saved session."));
-            return;
-        };
-        self.addToast(i18n._("Saved session deleted."));
+    pub fn archiveAndClose(self: *Self) void {
+        if (self.private().archive_on_close) return;
+        self.private().archive_on_close = true;
+        self.as(gtk.Window).present();
+        self.as(gtk.Window).close();
     }
 
     fn actionNewSession(_: *gio.SimpleAction, _: ?*glib.Variant, _: *Self) callconv(.c) void {
+        createSession();
+    }
+
+    pub fn createSession() void {
         if (!Application.default().sessionsEnabled()) return;
         const window = Self.new(Application.default(), .none);
         window.newTab(null, .none);
@@ -1324,7 +1241,13 @@ pub const Window = extern struct {
         const dialog = TitleDialog.new(.session, self.private().session_name);
         dialog.as(adw.AlertDialog).setBody(i18n._("Name this session to find its tabs and splits later."));
         _ = TitleDialog.signals.set.connect(dialog, *Self, sessionNameSet, self, .{});
+        _ = adw.Dialog.signals.closed.connect(dialog.as(adw.Dialog), *Self, sessionNameClosed, self, .{ .after = true });
         dialog.present(self.as(gtk.Widget));
+    }
+
+    fn sessionNameClosed(_: *adw.Dialog, self: *Self) callconv(.c) void {
+        if (self.as(gtk.Widget).getMapped() == 0) return;
+        if (self.getActiveSurface()) |surface| surface.grabFocus();
     }
 
     fn sessionNameSet(_: *TitleDialog, value: [*:0]const u8, self: *Self) callconv(.c) void {
@@ -2043,21 +1966,38 @@ pub const Window = extern struct {
                 .{},
             );
 
+            _ = CloseConfirmationDialog.signals.cancel.connect(dialog, *Self, closeConfirmationCancel, self, .{});
+
             // Show it
             dialog.present(self.as(gtk.Widget));
             return @intFromBool(true);
         }
 
-        Application.default().saveSessions();
-        self.as(gtk.Window).destroy();
-        return @intFromBool(false);
+        self.finishClose();
+        return @intFromBool(true);
     }
 
     fn closeConfirmationClose(
         _: *CloseConfirmationDialog,
         self: *Self,
     ) callconv(.c) void {
-        Application.default().saveSessions();
+        self.finishClose();
+    }
+
+    fn closeConfirmationCancel(_: *CloseConfirmationDialog, self: *Self) callconv(.c) void {
+        self.private().archive_on_close = false;
+    }
+
+    fn finishClose(self: *Self) void {
+        const app = Application.default();
+        if (self.private().archive_on_close) {
+            self.private().archive_on_close = false;
+            app.archiveClosingSession(self) catch |err| {
+                log.warn("unable to archive closing session err={}", .{err});
+                self.addToast(i18n._("Unable to archive this session. The window was kept open."));
+                return;
+            };
+        } else app.saveSessions();
         self.as(gtk.Window).destroy();
     }
 

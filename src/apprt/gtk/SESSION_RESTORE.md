@@ -21,15 +21,25 @@ in the last active-session index. Closing the last window retains that
 session for the next activation, including when a hidden quick terminal keeps
 the application running. Quick terminals are not persisted.
 
-Use **Manage Closed Sessions** in the session menu to archive or delete a saved
-session. Archiving hides it from the normal picker while keeping its layout
-and snapshots. **Archived Sessions** lets you unarchive it or delete it.
-Unarchiving returns it to the picker without opening a window.
+Choose **Manage Sessions…** in the session menu to open the Sessions window.
+It lists saved sessions with Open, Saved, or Archived status, alongside Open
+(or Focus), Rename, Archive, and Delete actions. **Show archived sessions**
+includes the archive in this list. Unarchive returns a session to the normal
+picker without opening it; Open also unarchives an archived session.
+
+For open sessions, **Archive and Close…** saves the latest layout and terminal
+contents, uses the usual running-process close confirmation, and archives the
+session only after close is accepted. Canceling keeps the window open and the
+session unarchived. An archive failure also keeps the terminal window open.
+The manager stays available even after archiving the only terminal window, so
+you can create a new session or reopen an archived one without a temporary
+terminal window. Closing the manager resumes normal quit-after-last-window
+behavior, including a configured delay.
 
 Deletion asks for confirmation and permanently removes the saved layout and
-all snapshot generations belonging to that session. Open sessions must be
-closed first; these operations never terminate a running session. The app
-finishes pending saves before modifying storage.
+all snapshot generations belonging to that session. Delete is disabled for
+open sessions; Archive and Close is the explicit way to stop a running session.
+The app finishes pending saves before modifying storage.
 
 ## Compact tabs
 
