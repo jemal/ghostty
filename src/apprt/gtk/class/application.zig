@@ -48,6 +48,7 @@ const OpenURI = @import("../portal.zig").OpenURI;
 const media = @import("../media.zig");
 const Overrides = @import("Overrides.zig");
 const sessions = @import("../session.zig");
+const SessionSave = @import("../session_save.zig");
 
 const log = std.log.scoped(.gtk_ghostty_application);
 
@@ -238,6 +239,7 @@ pub const Application = extern struct {
         bell_media: ?*gtk.MediaFile = null,
 
         session_timer: ?c_uint = null,
+        session_save: ?*SessionSave = null,
         session_index_hash: ?u64 = null,
 
         pub var offset: c_int = 0;
@@ -1250,6 +1252,7 @@ pub const Application = extern struct {
     ///
     /// If the config has errors this may show the config errors dialog.
     fn setConfig(self: *Self, config: *Config) void {
+        self.finishSessionSave();
         const priv = self.private();
         priv.config.unref();
         priv.config = config.ref();
@@ -1547,41 +1550,45 @@ pub const Application = extern struct {
 
     fn saveSessionsTimeout(data: ?*anyopaque) callconv(.c) c_int {
         const self: *Self = @ptrCast(@alignCast(data.?));
-        self.saveSessions();
+        const priv = self.private();
+        if (priv.session_save) |job| {
+            if (!job.done.load(.acquire)) return @intFromBool(glib.SOURCE_CONTINUE);
+            self.finishSessionSave();
+        }
+        if (self.sessionsEnabled()) {
+            const job = SessionSave.create(self, priv.session_index_hash) catch |err| {
+                log.warn("unable to capture sessions err={}", .{err});
+                return @intFromBool(glib.SOURCE_CONTINUE);
+            };
+            job.start() catch |err| {
+                log.warn("unable to start session save err={}", .{err});
+                _ = job.finish();
+                return @intFromBool(glib.SOURCE_CONTINUE);
+            };
+            priv.session_save = job;
+        }
         return @intFromBool(glib.SOURCE_CONTINUE);
     }
 
+    fn finishSessionSave(self: *Self) void {
+        const priv = self.private();
+        const job = priv.session_save orelse return;
+        priv.session_save = null;
+        priv.session_index_hash = job.finish();
+    }
+
     pub fn saveSessions(self: *Self) void {
+        self.finishSessionSave();
         if (!self.sessionsEnabled()) return;
-        self.saveSessionsFallible() catch |err| {
-            log.warn("unable to save sessions err={}", .{err});
+        const job = SessionSave.create(self, self.private().session_index_hash) catch |err| {
+            log.warn("unable to capture sessions err={}", .{err});
+            return;
         };
+        job.run();
+        self.private().session_index_hash = job.finish();
     }
 
     const SessionIndex = struct { version: u32 = sessions.version, sessions: []const u64 };
-
-    fn saveSessionsFallible(self: *Self) !void {
-        const dir = try self.sessionDir();
-        defer dir.close(global.io());
-        var ids: std.ArrayList(u64) = .empty;
-        defer ids.deinit(self.allocator());
-        var current: ?*glib.List = self.as(gtk.Application).getWindows();
-        while (current) |link| : (current = link.f_next) {
-            const ptr: *gtk.Window = @ptrCast(@alignCast(link.f_data orelse continue));
-            const window = gobject.ext.cast(Window, ptr) orelse continue;
-            if (try window.saveSession(dir)) try ids.append(self.allocator(), window.sessionId());
-        }
-        // Keep the last session available after the last window closes.
-        // A hidden quick terminal must never overwrite the saved workspace.
-        if (ids.items.len == 0) return;
-        std.mem.sort(u64, ids.items, {}, std.sort.asc(u64));
-        const bytes = try sessions.serialize(self.allocator(), SessionIndex{ .sessions = ids.items });
-        defer self.allocator().free(bytes);
-        const hash = std.hash.Wyhash.hash(0, bytes);
-        if (self.private().session_index_hash == hash) return;
-        try sessions.write(dir, global.io(), "active.json", bytes);
-        self.private().session_index_hash = hash;
-    }
 
     pub fn openSession(self: *Self, id: u64) !void {
         if (!self.sessionsEnabled()) return;
@@ -1635,6 +1642,7 @@ pub const Application = extern struct {
     }
 
     fn dispose(self: *Self) callconv(.c) void {
+        self.finishSessionSave();
         const priv = self.private();
         if (priv.session_timer) |source| {
             _ = glib.Source.remove(source);

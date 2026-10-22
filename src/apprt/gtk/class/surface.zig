@@ -576,6 +576,9 @@ pub const Surface = extern struct {
 
     const Private = struct {
         session_id: u64 = 0,
+        session_snapshot: ?u64 = null,
+        session_snapshot_path: ?[:0]u8 = null,
+        session_snapshot_bytes: ?[]u8 = null,
         /// The configuration that this surface is using.
         config: ?*Config = null,
 
@@ -1951,6 +1954,8 @@ pub const Surface = extern struct {
     fn finalize(self: *Self) callconv(.c) void {
         const alloc = Application.default().allocator();
         const priv = self.private();
+        if (priv.session_snapshot_path) |v| alloc.free(v);
+        if (priv.session_snapshot_bytes) |v| alloc.free(v);
         if (priv.core_surface) |v| {
             // Remove ourselves from the list of known surfaces in the app.
             // We do this before deinit in case a callback triggers
@@ -2141,6 +2146,43 @@ pub const Surface = extern struct {
     pub fn restoreSessionId(self: *Self, id: u64) void {
         self.private().session_id = id;
         self.private().focused = false;
+    }
+
+    pub fn sessionSnapshotId(self: *Self) ?u64 {
+        return self.private().session_snapshot;
+    }
+
+    pub fn setSessionSnapshotId(self: *Self, id: ?u64) void {
+        self.private().session_snapshot = id;
+    }
+
+    pub fn restoreSessionSnapshot(self: *Self, session: u64, generation: ?u64) void {
+        const id = generation orelse return;
+        const app = Application.default();
+        const dir = app.sessionDir() catch return;
+        defer dir.close(global.io());
+        var buf: [96]u8 = undefined;
+        const name = @import("../session.zig").snapshotFileName(&buf, session, self.sessionId(), id) catch return;
+        // Store an absolute path; inactive tabs load only when initialized.
+        self.private().session_snapshot_path = dir.realPathFileAlloc(global.io(), name, app.allocator()) catch return;
+        self.private().session_snapshot = id;
+    }
+
+    pub fn sessionSnapshot(self: *Self) ?[]const u8 {
+        const priv = self.private();
+        const app = Application.default();
+        const config = app.getConfig();
+        defer config.unref();
+        const limit = config.get().@"window-save-state-snapshot-limit";
+        if (!app.sessionsEnabled() or limit == 0) return null;
+        const path = priv.session_snapshot_path orelse return null;
+        if (priv.session_snapshot_bytes == null) {
+            priv.session_snapshot_bytes = std.Io.Dir.cwd().readFileAlloc(global.io(), path, app.allocator(), .limited(limit)) catch |err| {
+                log.warn("unable to read terminal snapshot err={}", .{err});
+                return null;
+            };
+        }
+        return priv.session_snapshot_bytes;
     }
 
     pub fn getTitleOverride(self: *Self) ?[:0]const u8 {
@@ -3562,6 +3604,11 @@ pub const Surface = extern struct {
             config.@"font-size",
         });
 
+        // Snapshot bytes are borrowed only during core initialization.
+        defer if (priv.session_snapshot_bytes) |bytes| {
+            alloc.free(bytes);
+            priv.session_snapshot_bytes = null;
+        };
         // Initialize the surface
         surface.init(
             alloc,

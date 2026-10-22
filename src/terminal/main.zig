@@ -24,6 +24,7 @@ pub const parse_table = @import("parse_table.zig");
 pub const paste = @import("paste.zig");
 pub const search = @import("search.zig");
 pub const snapshot = @import("snapshot/main.zig");
+pub const session = @import("session.zig");
 pub const sgr = @import("sgr.zig");
 pub const size = @import("size.zig");
 pub const size_report = @import("size_report.zig");

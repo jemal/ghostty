@@ -2304,10 +2304,19 @@ keybind: Keybinds = .{},
 ///
 /// GTK restores the sessions open at the last save. Closing a session window
 /// retains its saved layout so it can be reopened from the session menu.
-/// Shells start afresh; running commands and terminal contents are not restored.
+/// Primary-screen output and scrollback are restored from binary snapshots.
+/// Shells start afresh; running commands and alternate-screen programs are not
+/// resumed. Missing or incompatible snapshots start with an empty terminal.
 /// On GTK, `default` and `never` disable both saving and restoration. Previously
 /// saved sessions are retained while disabled.
 @"window-save-state": WindowSaveState = .default,
+
+/// Maximum binary snapshot size in bytes per pane for GTK named sessions.
+/// This includes screen contents, scrollback, and images. The default is
+/// 64 MiB. Zero disables saving and restoring terminal contents, while layout
+/// restoration remains enabled. Snapshots exceeding this limit retain their
+/// previous saved contents. Requires `window-save-state = always`.
+@"window-save-state-snapshot-limit": usize = 64 * 1024 * 1024,
 
 /// Resize the window in discrete increments of the focused surface's cell size.
 /// If this is disabled, surfaces are resized in pixel increments. Currently

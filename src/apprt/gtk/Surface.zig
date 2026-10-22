@@ -28,6 +28,10 @@ pub fn core(self: *Self) *CoreSurface {
     return self.surface.core().?;
 }
 
+pub fn sessionSnapshot(self: *Self) ?[]const u8 {
+    return self.surface.sessionSnapshot();
+}
+
 pub fn rtApp(self: *Self) *ApprtApp {
     _ = self;
     return Application.default().rt();

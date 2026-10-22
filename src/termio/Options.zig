@@ -9,6 +9,9 @@ const termio = @import("../termio.zig");
 /// All size metrics for the terminal.
 size: renderer.Size,
 
+/// Saved contents to restore before starting a fresh backend. Borrowed during init.
+initial_terminal_snapshot: ?[]const u8 = null,
+
 /// The full app configuration. This is only available during initialization.
 /// The memory it points to is NOT stable after the init call so any values
 /// in here must be copied.

@@ -1005,6 +1005,7 @@ pub const Window = extern struct {
             for (tree.nodes, nodes) |node, *out| out.* = switch (node) {
                 .leaf => |surface| .{ .leaf = .{
                     .id = surface.sessionId(),
+                    .snapshot = surface.sessionSnapshotId(),
                     .working_directory = if (surface.getSessionWorkingDirectory()) |pwd|
                         if (std.fs.path.isAbsolute(pwd)) try alloc.dupeSentinel(u8, pwd, 0) else null
                     else
@@ -1046,21 +1047,12 @@ pub const Window = extern struct {
         return @intCast(it.next().?.handle.idx());
     }
 
-    pub fn saveSession(self: *Self, dir: std.Io.Dir) !bool {
-        if (self.isQuickTerminal() or self.getTabView().getNPages() == 0) return false;
-        var arena: std.heap.ArenaAllocator = .init(Application.default().allocator());
-        defer arena.deinit();
-        const manifest = try self.captureSession(arena.allocator());
-        if (manifest.tabs.len == 0) return false;
-        try manifest.validate();
-        const bytes = try sessions.serialize(arena.allocator(), manifest);
-        const hash = std.hash.Wyhash.hash(0, bytes);
-        if (self.private().session_hash != hash) {
-            var buf: [32]u8 = undefined;
-            try sessions.write(dir, global.io(), try sessions.fileName(&buf, manifest.id), bytes);
-            self.private().session_hash = hash;
-        }
-        return true;
+    pub fn sessionHash(self: *Self) ?u64 {
+        return self.private().session_hash;
+    }
+
+    pub fn setSessionHash(self: *Self, hash: ?u64) void {
+        self.private().session_hash = hash;
     }
 
     pub fn restoreSession(manifest: sessions.Session) !*Self {
@@ -1080,7 +1072,7 @@ pub const Window = extern struct {
             const page = window.newTabPage(null, .tab, .none);
             const tab = gobject.ext.cast(Tab, page.getChild()).?;
             const widget = tab.getSplitTree();
-            var tree = try restoreSessionNode(widget, saved.nodes, 0);
+            var tree = try restoreSessionNode(widget, manifest.id, saved.nodes, 0);
             defer tree.deinit();
             var active: ?*Surface = null;
             var it = tree.iterator();
@@ -1098,7 +1090,7 @@ pub const Window = extern struct {
         return window;
     }
 
-    fn restoreSessionNode(widget: *SplitTree, nodes: []const sessions.Node, index: u32) std.mem.Allocator.Error!Surface.Tree {
+    fn restoreSessionNode(widget: *SplitTree, session_id: u64, nodes: []const sessions.Node, index: u32) std.mem.Allocator.Error!Surface.Tree {
         const alloc = Application.default().allocator();
         switch (nodes[index]) {
             .leaf => |leaf| {
@@ -1120,13 +1112,14 @@ pub const Window = extern struct {
                 _ = surface.refSink();
                 defer surface.unref();
                 surface.restoreSessionId(leaf.id);
+                surface.restoreSessionSnapshot(session_id, leaf.snapshot);
                 surface.bindIsSplit(widget);
                 return Surface.Tree.init(alloc, surface);
             },
             .split => |split| {
-                var left = try restoreSessionNode(widget, nodes, split.left);
+                var left = try restoreSessionNode(widget, session_id, nodes, split.left);
                 defer left.deinit();
-                var right = try restoreSessionNode(widget, nodes, split.right);
+                var right = try restoreSessionNode(widget, session_id, nodes, split.right);
                 defer right.deinit();
                 return left.split(alloc, .root, if (split.layout == .horizontal) .right else .down, @floatCast(split.ratio), &right);
             },

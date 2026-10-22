@@ -75,6 +75,7 @@ pub const Tab = struct {
 pub const Node = union(enum) {
     leaf: struct {
         id: u64,
+        snapshot: ?u64 = null,
         working_directory: ?[:0]const u8 = null,
         title: ?[:0]const u8 = null,
     },
@@ -130,6 +131,10 @@ pub fn open(io: std.Io, alloc: Allocator, base: []const u8, app_id: []const u8) 
 
 pub fn fileName(buf: []u8, id: u64) ![]const u8 {
     return std.mem.print(buf, "{x}.json", .{id});
+}
+
+pub fn snapshotFileName(buf: []u8, session: u64, pane: u64, generation: u64) ![]const u8 {
+    return std.mem.print(buf, "{x}-{x}-{x}.snapshot", .{ session, pane, generation });
 }
 
 /// Commit a complete file with rename; interrupted writes leave the old file.

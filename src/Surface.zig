@@ -709,6 +709,7 @@ pub fn init(
         errdefer io_config.deinit();
 
         try termio.Termio.init(&self.io, alloc, .{
+            .initial_terminal_snapshot = if (comptime @hasDecl(apprt.Surface, "sessionSnapshot")) rt_surface.sessionSnapshot() else null,
             .size = size,
             .full_config = config,
             .config = io_config,

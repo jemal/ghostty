@@ -12,7 +12,9 @@ The manifest preserves tab order, custom window/tab/pane titles, split
 orientations and ratios, working directories, active panes, selected tabs,
 zoom, window size, and maximized state. Shell integration improves directory
 tracking. Missing directories fall back to the normal startup directory.
-Shells start afresh; running commands and terminal contents are not restored.
+Primary-screen output, styles, hyperlinks, images, and scrollback are saved
+in binary snapshots. Shells start afresh; running commands and alternate-screen
+programs are not resumed.
 
 Closed sessions remain available in the menu. Startup restores the sessions
 in the last active-session index. Closing the last window retains that
@@ -26,11 +28,13 @@ per session plus `active.json`, which lists the sessions to restore. Display
 names never form paths. Pane IDs and session IDs are independent of runtime
 IPC IDs and remain stable across restoration.
 
-The application captures layout every two seconds, on session-menu opening,
-and before closing a window or quitting. Content hashes suppress unchanged
-writes. Files are written with user-only permissions to a unique temporary
+The application captures layout every two seconds and saves terminal contents
+and files on a background worker. Opening the session menu, closing a window,
+and quitting flush pending work and capture the latest state synchronously.
+Content hashes suppress unchanged writes. Files are written with user-only permissions to a unique temporary
 file, synced, then renamed. The active index is committed after the session
-files. This provides atomic individual files, not a transaction spanning all
+files, after each pane snapshot. This provides atomic individual files, not a
+transaction spanning all
 windows. Multiple application instances with the same application ID share
 the store; use distinct `class` values to keep independent stores.
 
@@ -40,15 +44,33 @@ prevent the other sessions from restoring. Unknown fields are tolerated.
 
 ## Binary snapshots
 
-This first layer restores layout and directories. Future content persistence
-can reference binary terminal snapshots by stable pane ID and generation.
-Commit the snapshots before publishing a manifest that references them.
+Each pane references an immutable generation in a
+`<session-id>-<pane-id>-<generation>.snapshot` file. Snapshots are committed
+before their manifest. Obsolete generations are removed only after the new
+manifest is committed. Closed sessions keep their snapshots. Inactive tabs
+load their contents when their surfaces initialize; autosaving an uninitialized
+pane retains its previous generation.
 
-Attaching a new shell needs an explicit policy for resetting old parser
-continuations, alternate-screen state, keyboard/mouse modes, and prompt
-state. Full terminal decoding alone does not restore the process that used
-to produce its output. Keep layout restore independent so an incompatible
-snapshot can fall back to a fresh pane without losing the session layout.
+`window-save-state-snapshot-limit` limits each binary file to 64 MiB by default,
+including images. Zero disables content saving and restoration while preserving
+layout restoration. A snapshot exceeding the limit keeps its previous saved
+generation rather than publishing truncated data. The file-size limit does not
+bound all temporary encoder/decoder memory.
+
+Restore takes the primary screen from a complete, validated binary snapshot
+and attaches it to a freshly initialized terminal. It discards parser
+continuations, alternate screens, keyboard/mouse modes, and cursor pen state.
+Current configuration supplies terminal defaults and scrollback/image limits;
+contents reflow to the current grid. Shell integration allows removal of an
+unfinished visible prompt and input before starting the new shell. Without
+integration, the old prompt remains as saved output. Saved input is never sent
+to the new process.
+
+Missing, corrupt, or incompatible snapshots fall back independently to fresh
+panes. Binary compatibility follows the upstream snapshot format; old content
+may become unreadable after an incompatible upstream update. Layout manifests
+remain usable without their snapshots. Snapshots contain terminal output and
+use the same user-only permissions as manifests.
 
 ## Validation
 
@@ -64,3 +86,9 @@ nested and unequal splits; active/zoomed panes in an inactive tab; renaming
 with Unicode; close and reopen; selecting an already open session; a missing
 directory; a corrupt session among valid ones; config reload to `never`; and
 reactivation while a hidden quick terminal keeps the process running.
+
+For snapshots, run `zig build test-lib-vt -Dtest-filter="session snapshot"`.
+Check styled output and scrollback across restart, fresh shell PIDs and input,
+primary-screen recovery while a fullscreen program was active, inactive-tab
+restoration, missing/corrupt snapshots, size-limit fallback, obsolete-generation
+cleanup, and config reload to zero or `never`.

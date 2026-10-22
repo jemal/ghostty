@@ -270,7 +270,7 @@ pub fn init(self: *Termio, alloc: Allocator, opts: termio.Options) !void {
     };
 
     // Create our terminal
-    var term = try terminalpkg.Terminal.init(global.io(), alloc, opts: {
+    const terminal_options: terminalpkg.Terminal.Options = opts: {
         const grid_size = opts.size.grid();
         break :opts .{
             .cols = grid_size.columns,
@@ -294,7 +294,14 @@ pub fn init(self: *Termio, alloc: Allocator, opts: termio.Options) !void {
             .kitty_image_storage_limit = opts.config.image_storage_limit,
             .kitty_image_loading_limits = .allWithTempDir(global.tmpDirPath()),
         };
-    });
+    };
+    var term = if (opts.initial_terminal_snapshot) |bytes|
+        terminalpkg.session.restore(alloc, global.io(), bytes, terminal_options) catch |err| fallback: {
+            log.warn("unable to restore terminal contents err={}", .{err});
+            break :fallback try terminalpkg.Terminal.init(global.io(), alloc, terminal_options);
+        }
+    else
+        try terminalpkg.Terminal.init(global.io(), alloc, terminal_options);
     errdefer term.deinit(alloc);
 
     // The default palette may be an allocator-owned copy, so it is set
