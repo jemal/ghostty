@@ -287,7 +287,13 @@ process ID, directory and name) and `ghostty.split`, `ghostty.tab` and
 `ghostty.window` with `command`, `cwd`, `title` and `wait`. Its tests and the
 ReleaseFast build passed and it is installed. The user's desktop test
 passed on 2026-10-22, with the Cargo split script.
-Phases 3 and 4 (waiting with coroutines, events) are not started. See
+Phase 3 runs each action as a coroutine that can wait, and adds
+`ghostty.exec` (GSubprocess, with a timeout), `ghostty.pick` (the native
+picker, through a new native entry point in the picker service),
+`ghostty.sleep`, `ghostty.after`, `ghostty.every` and `ghostty.cancel`.
+A reload or exit stops waiting processes, pickers and timers. Its tests and
+the ReleaseFast build passed and it is installed. The user's desktop test
+passed on 2026-10-23. Phase 4 (events) is not started. See
 `src/apprt/gtk/LUA_PLAN.md`.
 
 ### Native picker and IPC
@@ -433,6 +439,7 @@ Nothing was pushed during this work.
 | `xvyxyotw` | Unified searchable session overlay, keyboard actions, and handoff docs. |
 | `zpwtzozm` | gtk: add Lua scripting for actions and keybinds (phase 1) |
 | `onykxtxm` | gtk: let Lua inspect panes and open splits, tabs and windows (phase 2) |
+| `qpmzpspo` | gtk: let Lua actions wait for processes, the picker and timers (phase 3) |
 
 ## Related implementation documentation
 

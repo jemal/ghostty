@@ -2,7 +2,71 @@
 
 Status: phase 1 is implemented and passed the user's desktop test
 (2026-10-22). Phase 2 is implemented and passed the user's desktop test.
-Phases 3 and 4 are not started.
+Phase 3 is implemented and passed the user's desktop test (2026-10-23). Phase 4
+is not started.
+
+## Phase 3: what exists now
+
+- Each action, bound function and timer function runs in its own Lua
+  coroutine (a "task"). A task can wait for the host. While it waits, GTK
+  keeps running, and other actions can run.
+- `ghostty.exec(argv, { cwd?, timeout?, stdin? })` runs a process with
+  GSubprocess, without a shell, and waits for it. It returns
+  `{ status, signal, stdout, stderr }`, or `nil, err` if the process cannot
+  start. `timeout` is in seconds. After it, the process gets SIGTERM, and
+  SIGKILL two seconds later. The process gets Ghostty's environment.
+- `ghostty.pick{ surface?, title?, placeholder?, placement?, choices }`
+  opens the native picker on a pane and waits. A choice is a string (both
+  ID and label) or `{ id?, label, description? }`. It returns the chosen
+  ID, or `nil` if the picker is cancelled. The request goes through the
+  same JSON checks and limits as `ghostty +pick`.
+- `ghostty.sleep(seconds)` waits.
+- `ghostty.after(seconds, fn)` and `ghostty.every(seconds, fn)` run `fn` as
+  a new task later. They return a timer ID. `ghostty.cancel(id)` stops a
+  timer. They also work while `init.lua` loads; then `ctx.surface` is 0.
+  `every` needs at least 0.01 seconds.
+- Waiting works only in the task's own coroutine. In a coroutine that the
+  script makes, the functions return `nil, err`. A bare `coroutine.yield()`
+  in a task ends it with an error, because nothing would resume it.
+- The time limit (250 ms) applies to each run between two waits.
+- A bound function that returns `false` after it waited does not give the
+  key back to the terminal. The key counts as handled when the task first
+  waits.
+- A config reload or app exit stops all waiting operations: processes are
+  killed, pickers close and timers stop.
+- `ghostty.exec.start` (a process handle) is not implemented yet.
+
+Example: pick a Cargo target and run it in a split.
+
+```lua
+ghostty.bind("alt+;>r", function(ctx)
+  local root = cargo_root(pane_cwd(ctx.surface))
+  if not root then return false end
+
+  local r, err = ghostty.exec(
+    { "nix", "develop", "-c", "cargo", "metadata", "--no-deps", "--format-version=1" },
+    { cwd = root, timeout = 60 })
+  if not r then error(err, 0) end
+  if r.status ~= 0 then error(r.stderr, 0) end
+
+  -- Simple parsing: in `cargo metadata`, a target object starts with
+  -- "kind", then "crate_types", then "name".
+  local choices = {}
+  for name in r.stdout:gmatch('"kind":%["bin"%],"crate_types":%[[^%]]*%],"name":"([^"]+)"') do
+    table.insert(choices, name)
+  end
+  if #choices == 0 then return ghostty.toast("no bin targets") end
+
+  local target = ghostty.pick{ title = "Run Cargo target", choices = choices }
+  if not target then return end
+
+  ghostty.split{
+    command = { "nix", "develop", "-c", "cargo", "run", "--bin", target },
+    cwd = root,
+    wait = true,
+  }
+end)
+```
 
 ## Phase 2: what exists now
 
@@ -190,11 +254,11 @@ bound function shows as a toast and goes to the log.
 
 | Function | Result |
 |---|---|
-| `ghostty.exec(argv, { cwd?, timeout? })` | Runs a process and waits for it. Returns `{ status, stdout, stderr }`. The action pauses while it waits; the UI does not. |
-| `ghostty.exec.start(argv, opts)` | Starts a process and returns a handle with `wait`, `write`, `kill`, `running`. |
-| `ghostty.pick{ surface?, choices, placement? }` | Opens the native picker and waits for the choice. Returns the choice ID, or nil when the picker is cancelled. |
-| `ghostty.after(seconds, fn)`, `ghostty.every(seconds, fn)` | Timers. |
-| `ghostty.on(event, fn)` | Events: `surface_created`, `surface_closed`, `pwd_changed`, `title_changed`, `session_opened`, `command_finished`. |
+| `ghostty.exec(argv, { cwd?, timeout?, stdin? })` | Done in phase 3. Runs a process and waits for it. Returns `{ status, signal, stdout, stderr }`. The action pauses while it waits; the UI does not. |
+| `ghostty.exec.start(argv, opts)` | Not done. Starts a process and returns a handle with `wait`, `write`, `kill`, `running`. |
+| `ghostty.pick{ surface?, title?, placeholder?, placement?, choices }` | Done in phase 3. Opens the native picker and waits for the choice. Returns the choice ID, or nil when the picker is cancelled. |
+| `ghostty.sleep(seconds)`, `ghostty.after(seconds, fn)`, `ghostty.every(seconds, fn)`, `ghostty.cancel(id)` | Done in phase 3. Timers. |
+| `ghostty.on(event, fn)` | Phase 4. Events: `surface_created`, `surface_closed`, `pwd_changed`, `title_changed`, `session_opened`, `command_finished`. |
 
 ### ctx
 

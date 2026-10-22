@@ -51,6 +51,127 @@ pub const Host = struct {
     /// surface to split, of a surface in the window to add a tab to, or of
     /// the parent of a new window. It is zero when there is no parent.
     open: *const fn (ptr: *anyopaque, surface: u64, target: OpenTarget, options: OpenOptions) OpenError!void,
+
+    /// Start a process. When it exits, call `Runtime.complete` with an
+    /// `exec` result. On failure, write the reason to `err_buf`.
+    exec: *const fn (
+        ptr: *anyopaque,
+        callback: Callback,
+        argv: []const [:0]const u8,
+        options: ExecOptions,
+        err_buf: *ErrorBuffer,
+    ) error{ExecFailed}!Wait,
+
+    /// Show the picker on a surface. When it closes, call
+    /// `Runtime.complete` with a `pick` result.
+    pick: *const fn (
+        ptr: *anyopaque,
+        callback: Callback,
+        surface: u64,
+        request: PickRequest,
+        err_buf: *ErrorBuffer,
+    ) error{PickFailed}!Wait,
+
+    /// After `ms` milliseconds, call `Runtime.complete` with a `timer`
+    /// result.
+    timer: *const fn (ptr: *anyopaque, callback: Callback, ms: u32) Allocator.Error!Wait,
+};
+
+/// Where the host gives the result of an operation.
+pub const Callback = struct {
+    runtime: *Runtime,
+    id: u32,
+};
+
+/// A host operation that is not finished. `cancel` stops it. After
+/// `cancel`, the host must not call `Runtime.complete` for it.
+pub const Wait = struct {
+    ptr: *anyopaque,
+    cancel: *const fn (ptr: *anyopaque) void,
+};
+
+pub const Result = union(enum) {
+    exec: ExecResult,
+
+    /// The ID of the chosen item, or null if the picker was cancelled.
+    pick: ?[]const u8,
+
+    timer,
+
+    /// The operation failed. The task gets `nil, msg`.
+    failed: [:0]const u8,
+};
+
+pub const ExecOptions = struct {
+    cwd: ?[:0]const u8 = null,
+
+    /// Zero means no limit. After the limit, the process gets SIGTERM, and
+    /// SIGKILL two seconds later.
+    timeout_ms: u32 = 0,
+
+    stdin: ?[]const u8 = null,
+};
+
+pub const ExecResult = struct {
+    /// The exit status, if the process exited.
+    status: ?i32,
+
+    /// The signal, if a signal stopped the process.
+    signal: ?i32,
+
+    stdout: []const u8,
+    stderr: []const u8,
+};
+
+pub const PickRequest = struct {
+    title: ?[]const u8 = null,
+    placeholder: ?[]const u8 = null,
+    cursor: bool = false,
+    choices: []const Choice,
+
+    pub const Choice = struct {
+        id: []const u8,
+        label: []const u8,
+        description: []const u8 = "",
+    };
+};
+
+pub const ErrorBuffer = struct {
+    buf: [256]u8 = undefined,
+    len: usize = 0,
+
+    pub fn set(self: *ErrorBuffer, comptime fmt: []const u8, args: anytype) void {
+        const text: []const u8 = std.fmt.bufPrint(&self.buf, fmt, args) catch &self.buf;
+        self.len = text.len;
+    }
+
+    fn message(self: *const ErrorBuffer, default: []const u8) []const u8 {
+        return if (self.len > 0) self.buf[0..self.len] else default;
+    }
+};
+
+/// An action that runs or waits. Its coroutine stays in the Lua registry
+/// while the task exists.
+const Task = struct {
+    thread: *c.lua_State,
+    ref: c_int,
+
+    /// The action name, for error messages.
+    name: []const u8,
+
+    surface: u64,
+
+    /// The host operation that the task waits for. Null while it runs.
+    wait: ?Wait = null,
+};
+
+const Timer = struct {
+    /// The Lua function, as a reference in the Lua registry.
+    ref: c_int,
+    interval_ms: u32,
+    repeat: bool,
+    surface: u64,
+    wait: ?Wait,
 };
 
 pub const SurfaceInfo = struct {
@@ -133,6 +254,16 @@ depth: u8 = 0,
 /// The runtime ID of the surface that started the running action.
 surface: u64 = 0,
 
+/// The ID of the task that runs now, or zero.
+task: u32 = 0,
+
+tasks: std.AutoHashMapUnmanaged(u32, Task) = .empty,
+timers: std.AutoHashMapUnmanaged(u32, Timer) = .empty,
+
+/// The last ID of a task or timer. Tasks and timers share the IDs, so
+/// `complete` can find either.
+next_id: u32 = 0,
+
 pub const InitError = Allocator.Error || error{LuaInitFailed};
 
 pub fn create(alloc: Allocator, host: Host) InitError!*Runtime {
@@ -158,6 +289,15 @@ pub fn create(alloc: Allocator, host: Host) InitError!*Runtime {
 }
 
 pub fn destroy(self: *Runtime) void {
+    // Stop all host operations, so the host never calls `complete` on a
+    // runtime that is gone.
+    var tasks = self.tasks.valueIterator();
+    while (tasks.next()) |task| if (task.wait) |wait| wait.cancel(wait.ptr);
+    var timers = self.timers.valueIterator();
+    while (timers.next()) |timer| if (timer.wait) |wait| wait.cancel(wait.ptr);
+    self.tasks.deinit(self.alloc);
+    self.timers.deinit(self.alloc);
+
     c.lua_close(self.lua);
     self.actions.deinit(self.alloc);
     self.binds.deinit(self.alloc);
@@ -197,7 +337,8 @@ pub fn load(
 
     self.loading = true;
     defer self.loading = false;
-    self.startBudget(load_budget_ns);
+    self.deadline_ns = now() + load_budget_ns;
+    c.lua_sethook(L, budgetHook, c.LUA_MASKCOUNT, 10_000);
     defer c.lua_sethook(L, null, 0, 0);
 
     const status = status: {
@@ -218,7 +359,7 @@ pub fn load(
 /// returned `false` to let the key go to the terminal. Errors in the action
 /// show as a toast and the action counts as performed.
 pub fn run(self: *Runtime, name: []const u8, surface: u64) bool {
-    const action = self.actions.get(name) orelse {
+    const action = self.actions.getEntry(name) orelse {
         log.warn("no Lua action named {s}", .{name});
         return false;
     };
@@ -228,43 +369,181 @@ pub fn run(self: *Runtime, name: []const u8, surface: u64) bool {
         return true;
     }
 
+    _ = c.lua_rawgeti(self.lua, c.LUA_REGISTRYINDEX, action.value_ptr.ref);
+    return self.startTask(action.key_ptr.*, surface);
+}
+
+/// Give the result of a host operation to the task or timer `id`. The
+/// host calls this when an operation from `exec`, `pick` or `timer` ends.
+/// Strings in `result` must stay valid only during the call.
+pub fn complete(self: *Runtime, id: u32, result: Result) void {
+    if (self.timers.contains(id)) return self.fireTimer(id);
+
+    const task = self.tasks.getPtr(id) orelse return;
+    task.wait = null;
+    const co = task.thread;
+    const nargs: c_int = switch (result) {
+        .exec => |r| nargs: {
+            c.lua_createtable(co, 0, 4);
+            if (r.status) |v| {
+                c.lua_pushinteger(co, v);
+                c.lua_setfield(co, -2, "status");
+            }
+            if (r.signal) |v| {
+                c.lua_pushinteger(co, v);
+                c.lua_setfield(co, -2, "signal");
+            }
+            _ = c.lua_pushlstring(co, r.stdout.ptr, r.stdout.len);
+            c.lua_setfield(co, -2, "stdout");
+            _ = c.lua_pushlstring(co, r.stderr.ptr, r.stderr.len);
+            c.lua_setfield(co, -2, "stderr");
+            break :nargs 1;
+        },
+        .pick => |id_| nargs: {
+            if (id_) |v| _ = c.lua_pushlstring(co, v.ptr, v.len) else c.lua_pushnil(co);
+            break :nargs 1;
+        },
+        .timer => nargs: {
+            c.lua_pushboolean(co, 1);
+            break :nargs 1;
+        },
+        .failed => |msg| pushError(co, msg),
+    };
+    _ = self.resumeTask(id, nargs);
+}
+
+/// Start a task that runs the function on the top of the main Lua stack
+/// with `ctx` and `args`. Pops the function. Returns false only if the
+/// function returned `false` without waiting.
+fn startTask(self: *Runtime, name: []const u8, surface: u64) bool {
     const L = self.lua;
+
+    // Each task runs in its own coroutine, so it can wait. The registry
+    // keeps the coroutine alive while the task waits.
+    const co = c.lua_newthread(L).?;
+    c.lua_rotate(L, -2, 1);
+    c.lua_xmove(L, co, 1);
+    const ref = c.luaL_ref(L, c.LUA_REGISTRYINDEX);
+
+    const id = self.nextId();
+    self.tasks.put(self.alloc, id, .{
+        .thread = co,
+        .ref = ref,
+        .name = name,
+        .surface = surface,
+    }) catch {
+        c.luaL_unref(L, c.LUA_REGISTRYINDEX, ref);
+        self.showError(surface, "Lua: out of memory");
+        return true;
+    };
+
+    // ctx
+    c.lua_createtable(co, 0, 1);
+    c.lua_pushinteger(co, @bitCast(surface));
+    c.lua_setfield(co, -2, "surface");
+
+    // args. Keybinds and the command palette give no arguments.
+    c.lua_createtable(co, 0, 0);
+
+    return self.resumeTask(id, 2);
+}
+
+/// Resume the task `id` with `nargs` values on its stack. Returns false
+/// only if the task ended and returned `false`.
+fn resumeTask(self: *Runtime, id: u32, nargs: c_int) bool {
+    const task = self.tasks.get(id).?;
+    const co = task.thread;
+
+    const outer_task = self.task;
     const outer_surface = self.surface;
-    self.surface = surface;
+    self.task = id;
+    self.surface = task.surface;
     self.depth += 1;
     defer {
         self.depth -= 1;
+        self.task = outer_task;
         self.surface = outer_surface;
     }
 
-    // Only the outermost action sets the time limit. Nested actions are
-    // part of the time of the outer action.
-    if (self.depth == 1) self.startBudget(action_budget_ns);
-    defer if (self.depth == 1) c.lua_sethook(L, null, 0, 0);
+    // Only the outermost resume sets the time limit. Nested actions are
+    // part of the time of the outer action. Each resume after a wait
+    // gets a new limit.
+    if (self.depth == 1) self.deadline_ns = now() + action_budget_ns;
+    c.lua_sethook(co, budgetHook, c.LUA_MASKCOUNT, 10_000);
 
-    _ = c.lua_rawgeti(L, c.LUA_REGISTRYINDEX, action.ref);
+    var nres: c_int = 0;
+    switch (c.lua_resume(co, self.lua, nargs, &nres)) {
+        c.LUA_YIELD => {
+            c.lua_settop(co, 0);
 
-    // ctx
-    c.lua_createtable(L, 0, 1);
-    c.lua_pushinteger(L, @bitCast(surface));
-    c.lua_setfield(L, -2, "surface");
+            // Only the functions that wait for the host can yield the task.
+            // Any other yield would leave it waiting for nothing.
+            if (self.tasks.get(id).?.wait != null) return true;
+            self.showErrorFmt(task, "the action yielded outside of a ghostty function", .{});
+        },
 
-    // args. Keybinds and the command palette give no arguments.
-    c.lua_createtable(L, 0, 0);
+        c.LUA_OK => {
+            const performed = !(nres > 0 and
+                c.lua_type(co, -nres) == c.LUA_TBOOLEAN and
+                c.lua_toboolean(co, -nres) == 0);
+            self.finishTask(id);
+            return performed;
+        },
 
-    if (c.lua_pcallk(L, 2, 1, 0, 0, null) != c.LUA_OK) {
-        var buf: [512]u8 = undefined;
-        const msg = std.fmt.bufPrintSentinel(&buf, "Lua action {s}: {s}", .{
-            name,
-            popError(L),
-        }, 0) catch "Lua action failed";
-        self.showError(surface, msg);
-        return true;
+        else => self.showErrorFmt(task, "{s}", .{popError(co)}),
     }
 
-    const performed = !(c.lua_type(L, -1) == c.LUA_TBOOLEAN and c.lua_toboolean(L, -1) == 0);
-    c.lua_settop(L, -2);
-    return performed;
+    self.finishTask(id);
+    return true;
+}
+
+fn finishTask(self: *Runtime, id: u32) void {
+    const task = self.tasks.fetchRemove(id) orelse return;
+    c.luaL_unref(self.lua, c.LUA_REGISTRYINDEX, task.value.ref);
+}
+
+fn showErrorFmt(self: *Runtime, task: Task, comptime fmt: []const u8, args: anytype) void {
+    var buf: [512]u8 = undefined;
+    const msg = std.fmt.bufPrintSentinel(
+        &buf,
+        "Lua action {s}: " ++ fmt,
+        .{task.name} ++ args,
+        0,
+    ) catch "Lua action failed";
+    self.showError(task.surface, msg);
+}
+
+/// Run timer `id`. A repeating timer is armed again first, so its function
+/// can cancel it.
+fn fireTimer(self: *Runtime, id: u32) void {
+    const timer = self.timers.getPtr(id).?;
+    timer.wait = null;
+    const ref = timer.ref;
+    const surface = timer.surface;
+
+    _ = c.lua_rawgeti(self.lua, c.LUA_REGISTRYINDEX, ref);
+    if (timer.repeat) {
+        timer.wait = self.host.timer(self.host.ptr, .{ .runtime = self, .id = id }, timer.interval_ms) catch null;
+        if (timer.wait == null) self.removeTimer(id);
+    } else self.removeTimer(id);
+
+    _ = self.startTask("timer", surface);
+}
+
+fn removeTimer(self: *Runtime, id: u32) void {
+    const timer = self.timers.fetchRemove(id) orelse return;
+    if (timer.value.wait) |wait| wait.cancel(wait.ptr);
+    c.luaL_unref(self.lua, c.LUA_REGISTRYINDEX, timer.value.ref);
+}
+
+fn nextId(self: *Runtime) u32 {
+    self.next_id +%= 1;
+    if (self.next_id == 0) self.next_id = 1;
+    return self.next_id;
+}
+
+fn now() i96 {
+    return std.Io.Timestamp.now(global.io(), .awake).toNanoseconds();
 }
 
 /// Build the config entries for the actions and binds that `init.lua`
@@ -311,7 +590,7 @@ pub fn configEntries(self: *const Runtime, alloc: Allocator) Allocator.Error![]c
 fn installApi(self: *Runtime) void {
     const L = self.lua;
 
-    c.lua_createtable(L, 0, 9);
+    c.lua_createtable(L, 0, 15);
     const functions = .{
         .{ "action", luaAction },
         .{ "bind", luaBind },
@@ -321,6 +600,12 @@ fn installApi(self: *Runtime) void {
         .{ "split", luaSplit },
         .{ "tab", luaTab },
         .{ "window", luaWindow },
+        .{ "exec", luaExec },
+        .{ "pick", luaPick },
+        .{ "sleep", luaSleep },
+        .{ "after", luaAfter },
+        .{ "every", luaEvery },
+        .{ "cancel", luaCancel },
     };
     inline for (functions) |entry| {
         c.lua_pushcclosure(L, entry[1], 0);
@@ -350,15 +635,9 @@ fn installApi(self: *Runtime) void {
     }
 }
 
-fn startBudget(self: *Runtime, budget_ns: i96) void {
-    self.deadline_ns = std.Io.Timestamp.now(global.io(), .awake).toNanoseconds() + budget_ns;
-    c.lua_sethook(self.lua, budgetHook, c.LUA_MASKCOUNT, 10_000);
-}
-
 fn budgetHook(L: ?*c.lua_State, _: [*c]c.lua_Debug) callconv(.c) void {
     const self = fromState(L);
-    const now = std.Io.Timestamp.now(global.io(), .awake).toNanoseconds();
-    if (now > self.deadline_ns) _ = c.luaL_error(L, "Lua code ran for too long");
+    if (now() > self.deadline_ns) _ = c.luaL_error(L, "Lua code ran for too long");
 }
 
 fn showError(self: *Runtime, surface: u64, msg: [:0]const u8) void {
@@ -627,8 +906,200 @@ fn openOptions(
     return options;
 }
 
+/// The task that runs in `L`, if `L` can wait for the host. A task can
+/// wait only in its own coroutine, not in a coroutine that the action made.
+fn waitingTask(self: *Runtime, L: ?*c.lua_State) ?*Task {
+    if (self.task == 0 or c.lua_isyieldable(L) == 0) return null;
+    const task = self.tasks.getPtr(self.task) orelse return null;
+    return if (task.thread == L.?) task else null;
+}
+
+/// Wait for `wait` in `task`. Returns the result of `lua_yield`.
+fn yieldTask(L: ?*c.lua_State, task: *Task, wait: Wait) c_int {
+    task.wait = wait;
+    return c.lua_yieldk(L, 0, 0, null);
+}
+
+/// A time in seconds as milliseconds, from 1 ms to one day.
+fn checkSeconds(L: ?*c.lua_State, idx: c_int) u32 {
+    const seconds = c.luaL_checknumber(L, idx);
+    if (!(seconds >= 0 and seconds <= 24 * 60 * 60))
+        _ = c.luaL_argerror(L, idx, "must be from 0 to 86400 seconds");
+    return @max(1, @as(u32, @intFromFloat(seconds * 1000)));
+}
+
+/// ghostty.exec(argv, { cwd?, timeout?, stdin? }) -> { status, signal, stdout, stderr } | nil, err
+fn luaExec(L: ?*c.lua_State) callconv(.c) c_int {
+    const self = fromState(L);
+    c.luaL_checktype(L, 1, c.LUA_TTABLE);
+    const has_options = c.lua_type(L, 2) > c.LUA_TNIL;
+    if (has_options) c.luaL_checktype(L, 2, c.LUA_TTABLE);
+    c.lua_settop(L, 2);
+    const task = self.waitingTask(L) orelse
+        return pushError(L, "ghostty.exec works only inside an action, outside of other coroutines");
+
+    _ = self.scratch.reset(.retain_capacity);
+    const alloc = self.scratch.allocator();
+
+    const argv = argv: {
+        const len: usize = @intCast(c.lua_rawlen(L, 1));
+        if (len == 0) return pushError(L, "argv must be a non-empty list of strings");
+        const argv = alloc.alloc([:0]const u8, len) catch return pushError(L, "out of memory");
+        for (argv, 1..) |*arg, i| {
+            defer c.lua_settop(L, 2);
+            if (c.lua_rawgeti(L, 1, @intCast(i)) != c.LUA_TSTRING)
+                return pushError(L, "argv must be a non-empty list of strings");
+            arg.* = alloc.dupeSentinel(u8, toString(L, -1), 0) catch return pushError(L, "out of memory");
+        }
+        break :argv argv;
+    };
+
+    var options: ExecOptions = .{};
+    if (has_options) {
+        if (fieldString(L, 2, "cwd")) |cwd|
+            options.cwd = alloc.dupeSentinel(u8, cwd, 0) catch return pushError(L, "out of memory");
+        if (fieldString(L, 2, "stdin")) |stdin|
+            options.stdin = alloc.dupe(u8, stdin) catch return pushError(L, "out of memory");
+        timeout: {
+            defer c.lua_settop(L, 2);
+            if (c.lua_getfield(L, 2, "timeout") != c.LUA_TNUMBER) break :timeout;
+            const seconds = c.lua_tonumberx(L, -1, null);
+            if (!(seconds > 0 and seconds <= 24 * 60 * 60))
+                return pushError(L, "timeout must be from 0 to 86400 seconds");
+            options.timeout_ms = @max(1, @as(u32, @intFromFloat(seconds * 1000)));
+        }
+    }
+
+    var err_buf: ErrorBuffer = .{};
+    const wait = self.host.exec(self.host.ptr, .{ .runtime = self, .id = self.task }, argv, options, &err_buf) catch
+        return pushError(L, err_buf.message("unable to start the command"));
+    return yieldTask(L, task, wait);
+}
+
+/// ghostty.pick{ surface?, title?, placeholder?, placement?, choices } -> id | nil [, err]
+fn luaPick(L: ?*c.lua_State) callconv(.c) c_int {
+    const self = fromState(L);
+    c.luaL_checktype(L, 1, c.LUA_TTABLE);
+    c.lua_settop(L, 1);
+    const task = self.waitingTask(L) orelse
+        return pushError(L, "ghostty.pick works only inside an action, outside of other coroutines");
+
+    _ = self.scratch.reset(.retain_capacity);
+    const alloc = self.scratch.allocator();
+
+    const surface: u64 = surface: {
+        defer c.lua_settop(L, 1);
+        switch (c.lua_getfield(L, 1, "surface")) {
+            c.LUA_TNIL => break :surface self.surface,
+            c.LUA_TNUMBER => if (c.lua_isinteger(L, -1) != 0)
+                break :surface @bitCast(c.lua_tointegerx(L, -1, null)),
+            else => {},
+        }
+        return pushError(L, "surface must be a surface ID");
+    };
+
+    var request: PickRequest = .{ .choices = &.{} };
+    if (fieldString(L, 1, "title")) |v| request.title = alloc.dupe(u8, v) catch return pushError(L, "out of memory");
+    if (fieldString(L, 1, "placeholder")) |v| request.placeholder = alloc.dupe(u8, v) catch return pushError(L, "out of memory");
+    if (fieldString(L, 1, "placement")) |v| {
+        if (std.mem.eql(u8, v, "cursor")) request.cursor = true else if (!std.mem.eql(u8, v, "center"))
+            return pushError(L, "placement must be center or cursor");
+    }
+
+    request.choices = choices: {
+        defer c.lua_settop(L, 1);
+        if (c.lua_getfield(L, 1, "choices") != c.LUA_TTABLE) return pushError(L, "choices must be a list");
+        const len: usize = @intCast(c.lua_rawlen(L, 2));
+        if (len == 0) return pushError(L, "choices must not be empty");
+        const choices = alloc.alloc(PickRequest.Choice, len) catch return pushError(L, "out of memory");
+        for (choices, 1..) |*choice, i| {
+            defer c.lua_settop(L, 2);
+            switch (c.lua_rawgeti(L, 2, @intCast(i))) {
+                // A string is both the ID and the label.
+                c.LUA_TSTRING => {
+                    const text = alloc.dupe(u8, toString(L, -1)) catch return pushError(L, "out of memory");
+                    choice.* = .{ .id = text, .label = text };
+                },
+                c.LUA_TTABLE => {
+                    const label = fieldString(L, 3, "label") orelse
+                        return pushError(L, "each choice needs a label");
+                    choice.* = .{
+                        .label = alloc.dupe(u8, label) catch return pushError(L, "out of memory"),
+                        .id = alloc.dupe(u8, fieldString(L, 3, "id") orelse label) catch
+                            return pushError(L, "out of memory"),
+                        .description = alloc.dupe(u8, fieldString(L, 3, "description") orelse "") catch
+                            return pushError(L, "out of memory"),
+                    };
+                },
+                else => return pushError(L, "each choice must be a string or a table"),
+            }
+        }
+        break :choices choices;
+    };
+
+    var err_buf: ErrorBuffer = .{};
+    const wait = self.host.pick(self.host.ptr, .{ .runtime = self, .id = self.task }, surface, request, &err_buf) catch
+        return pushError(L, err_buf.message("unable to open the picker"));
+    return yieldTask(L, task, wait);
+}
+
+/// ghostty.sleep(seconds) -> true | nil, err
+fn luaSleep(L: ?*c.lua_State) callconv(.c) c_int {
+    const self = fromState(L);
+    const ms = checkSeconds(L, 1);
+    const task = self.waitingTask(L) orelse
+        return pushError(L, "ghostty.sleep works only inside an action, outside of other coroutines");
+    const wait = self.host.timer(self.host.ptr, .{ .runtime = self, .id = self.task }, ms) catch
+        return pushError(L, "out of memory");
+    return yieldTask(L, task, wait);
+}
+
+/// ghostty.after(seconds, fn) -> id
+fn luaAfter(L: ?*c.lua_State) callconv(.c) c_int {
+    return addTimer(L, false);
+}
+
+/// ghostty.every(seconds, fn) -> id
+fn luaEvery(L: ?*c.lua_State) callconv(.c) c_int {
+    return addTimer(L, true);
+}
+
+fn addTimer(L: ?*c.lua_State, repeat: bool) c_int {
+    const self = fromState(L);
+    const ms = checkSeconds(L, 1);
+    if (repeat and ms < 10) return c.luaL_argerror(L, 1, "must be at least 0.01 seconds");
+    c.luaL_checktype(L, 2, c.LUA_TFUNCTION);
+    c.lua_settop(L, 2);
+
+    const id = self.nextId();
+    self.timers.ensureUnusedCapacity(self.alloc, 1) catch return pushError(L, "out of memory");
+    const wait = self.host.timer(self.host.ptr, .{ .runtime = self, .id = id }, ms) catch
+        return pushError(L, "out of memory");
+
+    // No Lua errors can happen after this point, except out of memory.
+    self.timers.putAssumeCapacity(id, .{
+        .ref = c.luaL_ref(L, c.LUA_REGISTRYINDEX),
+        .interval_ms = ms,
+        .repeat = repeat,
+        .surface = self.surface,
+        .wait = wait,
+    });
+    c.lua_pushinteger(L, id);
+    return 1;
+}
+
+/// ghostty.cancel(id) -> true if a timer was cancelled
+fn luaCancel(L: ?*c.lua_State) callconv(.c) c_int {
+    const self = fromState(L);
+    const id = std.math.cast(u32, c.luaL_checkinteger(L, 1)) orelse 0;
+    const found = self.timers.contains(id);
+    if (found) self.removeTimer(id);
+    c.lua_pushboolean(L, @intFromBool(found));
+    return 1;
+}
+
 /// Push `nil, msg`, the result of a failed call.
-fn pushError(L: ?*c.lua_State, msg: [:0]const u8) c_int {
+fn pushError(L: ?*c.lua_State, msg: []const u8) c_int {
     c.lua_pushnil(L);
     _ = c.lua_pushlstring(L, msg.ptr, msg.len);
     return 2;
@@ -747,8 +1218,77 @@ const TestHost = struct {
         wait: ?bool,
     } = null,
 
+    /// The text of the last toast.
+    last_toast: [64]u8 = @splat(0),
+
+    /// The callback of the last `exec`, `pick` or `timer` call.
+    callback: ?Callback = null,
+    exec_argc: usize = 0,
+    pick_count: usize = 0,
+    timer_ms: u32 = 0,
+    cancels: usize = 0,
+
     fn host(self: *TestHost) Host {
-        return .{ .ptr = self, .invoke = invoke, .toast = toast, .info = info, .open = openSurface };
+        return .{
+            .ptr = self,
+            .invoke = invoke,
+            .toast = toast,
+            .info = info,
+            .open = openSurface,
+            .exec = exec,
+            .pick = pick,
+            .timer = timer,
+        };
+    }
+
+    fn wait(self: *TestHost) Wait {
+        return .{ .ptr = self, .cancel = cancel };
+    }
+
+    fn cancel(ptr: *anyopaque) void {
+        const self: *TestHost = @ptrCast(@alignCast(ptr));
+        self.cancels += 1;
+    }
+
+    fn exec(
+        ptr: *anyopaque,
+        callback: Callback,
+        argv: []const [:0]const u8,
+        _: ExecOptions,
+        err_buf: *ErrorBuffer,
+    ) error{ExecFailed}!Wait {
+        const self: *TestHost = @ptrCast(@alignCast(ptr));
+        if (std.mem.eql(u8, argv[0], "missing")) {
+            err_buf.set("{s}: not found", .{argv[0]});
+            return error.ExecFailed;
+        }
+        self.callback = callback;
+        self.exec_argc = argv.len;
+        return self.wait();
+    }
+
+    fn pick(
+        ptr: *anyopaque,
+        callback: Callback,
+        _: u64,
+        request: PickRequest,
+        _: *ErrorBuffer,
+    ) error{PickFailed}!Wait {
+        const self: *TestHost = @ptrCast(@alignCast(ptr));
+        self.callback = callback;
+        self.pick_count = request.choices.len;
+        return self.wait();
+    }
+
+    fn timer(ptr: *anyopaque, callback: Callback, ms: u32) Allocator.Error!Wait {
+        const self: *TestHost = @ptrCast(@alignCast(ptr));
+        self.callback = callback;
+        self.timer_ms = ms;
+        return self.wait();
+    }
+
+    fn lastToast(self: *const TestHost) []const u8 {
+        return std.mem.sliceTo(&self.last_toast, 0);
     }
 
     fn info(_: *anyopaque, alloc: Allocator, surface: u64) Allocator.Error!?SurfaceInfo {
@@ -788,9 +1328,12 @@ const TestHost = struct {
         return true;
     }
 
-    fn toast(ptr: *anyopaque, _: u64, _: [:0]const u8) void {
+    fn toast(ptr: *anyopaque, _: u64, text: [:0]const u8) void {
         const self: *TestHost = @ptrCast(@alignCast(ptr));
         self.toasts += 1;
+        self.last_toast = @splat(0);
+        const len = @min(text.len, self.last_toast.len - 1);
+        @memcpy(self.last_toast[0..len], text[0..len]);
     }
 };
 
@@ -992,4 +1535,136 @@ test "split, tab and window pass their options to the host" {
 
     try testing.expect(rt.run("bad", 7));
     try testing.expectEqual(@as(usize, 0), host.toasts);
+}
+
+test "exec waits for the host and gives the result to the action" {
+    const testing = std.testing;
+    var host: TestHost = .{};
+    const rt = try create(testing.allocator, host.host());
+    defer rt.destroy();
+
+    try testLoad(rt,
+        \\ghostty.action{ name = "run", run = function()
+        \\  local r = assert(ghostty.exec({ "cargo", "metadata" }, { cwd = "/src", timeout = 5 }))
+        \\  ghostty.toast(r.stdout .. ":" .. r.status)
+        \\  local none, err = ghostty.exec({ "missing" })
+        \\  ghostty.toast(err)
+        \\end }
+    );
+
+    // The action waits, so the key counts as handled.
+    try testing.expect(rt.run("run", 7));
+    try testing.expectEqual(@as(usize, 2), host.exec_argc);
+    try testing.expectEqual(@as(usize, 1), rt.tasks.count());
+
+    rt.complete(host.callback.?.id, .{ .exec = .{
+        .status = 0,
+        .signal = null,
+        .stdout = "out",
+        .stderr = "",
+    } });
+    try testing.expectEqual(@as(usize, 2), host.toasts);
+    try testing.expectEqualStrings("missing: not found", host.lastToast());
+    try testing.expectEqual(@as(usize, 0), rt.tasks.count());
+}
+
+test "pick gives the chosen ID, or nil when cancelled" {
+    const testing = std.testing;
+    var host: TestHost = .{};
+    const rt = try create(testing.allocator, host.host());
+    defer rt.destroy();
+
+    try testLoad(rt,
+        \\ghostty.action{ name = "pick", run = function()
+        \\  local id = ghostty.pick{ choices = { "a", { id = "b", label = "B", description = "bee" } } }
+        \\  ghostty.toast(tostring(id))
+        \\end }
+    );
+
+    try testing.expect(rt.run("pick", 7));
+    try testing.expectEqual(@as(usize, 2), host.pick_count);
+    rt.complete(host.callback.?.id, .{ .pick = "b" });
+    try testing.expectEqualStrings("b", host.lastToast());
+
+    try testing.expect(rt.run("pick", 7));
+    rt.complete(host.callback.?.id, .{ .pick = null });
+    try testing.expectEqualStrings("nil", host.lastToast());
+}
+
+test "sleep, after, every and cancel use host timers" {
+    const testing = std.testing;
+    var host: TestHost = .{};
+    const rt = try create(testing.allocator, host.host());
+    defer rt.destroy();
+
+    try testLoad(rt,
+        \\count = 0
+        \\ghostty.action{ name = "sleep", run = function()
+        \\  assert(ghostty.sleep(0.5))
+        \\  ghostty.toast("woke")
+        \\end }
+        \\ghostty.action{ name = "every", run = function()
+        \\  timer = ghostty.every(2, function()
+        \\    count = count + 1
+        \\    ghostty.toast("tick " .. count)
+        \\    if count == 2 then ghostty.cancel(timer) end
+        \\  end)
+        \\end }
+    );
+
+    try testing.expect(rt.run("sleep", 7));
+    try testing.expectEqual(@as(u32, 500), host.timer_ms);
+    rt.complete(host.callback.?.id, .timer);
+    try testing.expectEqualStrings("woke", host.lastToast());
+
+    try testing.expect(rt.run("every", 7));
+    try testing.expectEqual(@as(u32, 2000), host.timer_ms);
+    const id = host.callback.?.id;
+    rt.complete(id, .timer);
+    try testing.expectEqualStrings("tick 1", host.lastToast());
+    rt.complete(id, .timer);
+    try testing.expectEqualStrings("tick 2", host.lastToast());
+
+    // The second tick cancelled the timer that it armed again.
+    try testing.expectEqual(@as(usize, 1), host.cancels);
+    try testing.expectEqual(@as(usize, 0), rt.timers.count());
+    rt.complete(id, .timer);
+    try testing.expectEqualStrings("tick 2", host.lastToast());
+}
+
+test "destroy cancels waiting operations" {
+    const testing = std.testing;
+    var host: TestHost = .{};
+    const rt = try create(testing.allocator, host.host());
+
+    try testLoad(rt,
+        \\ghostty.after(60, function() end)
+        \\ghostty.action{ name = "wait", run = function() ghostty.sleep(60) end }
+    );
+    try testing.expect(rt.run("wait", 7));
+    rt.destroy();
+    try testing.expectEqual(@as(usize, 2), host.cancels);
+}
+
+test "waiting fails outside the task coroutine" {
+    const testing = std.testing;
+    var host: TestHost = .{};
+    const rt = try create(testing.allocator, host.host());
+    defer rt.destroy();
+
+    try testLoad(rt,
+        \\assert(ghostty.sleep(1) == nil)
+        \\ghostty.action{ name = "inner", run = function()
+        \\  local ok, err = coroutine.wrap(function() return ghostty.sleep(1) end)()
+        \\  assert(ok == nil and err)
+        \\end }
+        \\ghostty.action{ name = "yield", run = function() coroutine.yield() end }
+    );
+    try testing.expect(rt.run("inner", 7));
+    try testing.expectEqual(@as(usize, 0), host.toasts);
+
+    // A bare yield would wait forever, so it ends the action with an error.
+    try testing.expect(rt.run("yield", 7));
+    try testing.expectEqual(@as(usize, 1), host.toasts);
+    try testing.expectEqual(@as(usize, 0), rt.tasks.count());
 }

@@ -31,6 +31,17 @@ const Entry = struct {
     list: List,
     timer: c_uint = 0,
     watch: c_uint = 0,
+    native: ?Native = null,
+};
+
+/// A picker request from inside Ghostty (Lua), with a callback in place of
+/// a D-Bus reply.
+pub const Native = struct {
+    ptr: *anyopaque,
+
+    /// Called once with the chosen ID, or null if the picker was cancelled.
+    /// The ID is valid only during the call.
+    done: *const fn (ptr: *anyopaque, id: ?[]const u8) void,
 };
 const xml =
     \\<node><interface name="com.mitchellh.ghostty.Picker1">
@@ -167,7 +178,7 @@ fn select(self: *Self, sender: [*:0]const u8, text: []const u8, invocation: *gio
         self.reject(invocation, request.request_id, "surface_not_found");
         return;
     };
-    self.present(core.rt_surface.gobj(), parsed, std.mem.span(sender), invocation) catch |err| {
+    self.present(core.rt_surface.gobj(), parsed, std.mem.span(sender), invocation, null) catch |err| {
         self.reject(invocation, request.request_id, switch (err) {
             error.Busy => "busy",
             error.DuplicateRequest => "duplicate_request",
@@ -180,8 +191,26 @@ fn select(self: *Self, sender: [*:0]const u8, text: []const u8, invocation: *gio
     transferred = true;
 }
 
+/// Show a picker for a request from inside Ghostty. Takes ownership of
+/// parsed only on success. `native.done` is called when the picker closes,
+/// unless `cancelNative` cancels it first.
+pub fn presentNative(self: *Self, surface: *Surface, parsed: std.json.Parsed(protocol.Request), native: Native) !void {
+    try self.present(surface, parsed, "", null, native);
+}
+
+/// Close the native picker with this `ptr` without calling its callback.
+pub fn cancelNative(self: *Self, ptr: *anyopaque) void {
+    for (self.requests.items) |entry| {
+        const native = entry.native orelse continue;
+        if (native.ptr != ptr) continue;
+        entry.native = null;
+        self.finish(entry, null, "cancelled", true);
+        return;
+    }
+}
+
 /// Takes ownership of parsed only on success.
-fn present(self: *Self, surface: *Surface, parsed: std.json.Parsed(protocol.Request), sender: []const u8, invocation: ?*gio.DBusMethodInvocation) !void {
+fn present(self: *Self, surface: *Surface, parsed: std.json.Parsed(protocol.Request), sender: []const u8, invocation: ?*gio.DBusMethodInvocation, native: ?Native) !void {
     const request = parsed.value;
     if (ext.getAncestor(Window, surface.as(gtk.Widget))) |window| window.cancelThemePicker();
     if (surface.hasChildExited()) return error.ChildExited;
@@ -202,7 +231,7 @@ fn present(self: *Self, surface: *Surface, parsed: std.json.Parsed(protocol.Requ
     errdefer self.alloc.destroy(entry);
     const sender_copy = try self.alloc.dupeSentinel(u8, sender, 0);
     errdefer self.alloc.free(sender_copy);
-    entry.* = .{ .service = self, .request = parsed, .sender = sender_copy, .surface_identity = surface, .invocation = invocation, .list = undefined };
+    entry.* = .{ .service = self, .request = parsed, .sender = sender_copy, .surface_identity = surface, .invocation = invocation, .list = undefined, .native = native };
     try entry.list.init(self.alloc, request, selected, entry);
     errdefer entry.list.deinit();
     try self.requests.append(self.alloc, entry);
@@ -256,6 +285,10 @@ fn finish(self: *Self, entry: *Entry, index: ?usize, reason: []const u8, restore
             self.alloc.free(bytes);
         } else invocation.returnDbusError("com.mitchellh.ghostty.Picker1.NoMemory", "Cannot allocate picker response");
     }
+    if (entry.native) |native| native.done(
+        native.ptr,
+        if (index) |i| entry.request.value.choices[i].id else null,
+    );
     entry.list.deinit();
     entry.request.deinit();
     self.alloc.free(entry.sender);
