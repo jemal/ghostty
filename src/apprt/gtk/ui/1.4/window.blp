@@ -35,6 +35,8 @@ template $GhosttyWindow: Adw.ApplicationWindow {
     Adw.ToolbarView toolbar {
       top-bar-style: bind template.toolbar-style;
       bottom-bar-style: bind template.toolbar-style;
+      reveal-top-bars: bind template.toolbar-visible;
+      reveal-bottom-bars: bind template.toolbar-visible;
 
       [top]
       Adw.HeaderBar {
@@ -275,6 +277,11 @@ menu main_menu {
     item {
       label: _("View Open Tabs");
       action: "win.toggle-tab-overview";
+    }
+
+    item {
+      label: _("Show/Hide Toolbar");
+      action: "win.toggle-toolbar";
     }
 
     item {

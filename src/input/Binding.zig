@@ -597,6 +597,11 @@ pub const Action = union(enum) {
     /// found by running `ghostty +version`.
     toggle_tab_overview,
 
+    /// Show or hide the current window's GTK headerbar and tab bar.
+    /// This can reveal toolbars hidden with `gtk-toolbar-visible = false`.
+    /// Only supported by the GTK runtime.
+    toggle_toolbar,
+
     /// Change the title of the current focused surface via a pop-up prompt.
     prompt_surface_title,
 
@@ -1451,6 +1456,7 @@ pub const Action = union(enum) {
             .move_tab,
             .move_tab_to_new_window,
             .toggle_tab_overview,
+            .toggle_toolbar,
             .new_split,
             .goto_split,
             .goto_window,

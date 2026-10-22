@@ -453,6 +453,12 @@ fn actionCommands(action: Action.Key) []const Command {
             .description = i18n.N_("Toggle the tab overview."),
         }},
 
+        .toggle_toolbar => comptime &.{.{
+            .action = .toggle_toolbar,
+            .title = i18n.N_("Toggle Toolbar"),
+            .description = i18n.N_("Show or hide the window toolbars (GTK only)."),
+        }},
+
         .prompt_surface_title => comptime &.{.{
             .action = .prompt_surface_title,
             .title = i18n.N_("Change Terminal Title…"),

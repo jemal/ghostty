@@ -48,6 +48,14 @@ pub const Window = extern struct {
     });
 
     pub const properties = struct {
+        pub const @"toolbar-visible" = struct {
+            pub const name = "toolbar-visible";
+            const impl = gobject.ext.defineProperty(name, Self, bool, .{
+                .default = true,
+                .accessor = gobject.ext.typedAccessor(Self, bool, .{ .getter = getToolbarVisible }),
+            });
+        };
+
         pub const @"tabs-compact" = struct {
             pub const name = "tabs-compact";
             const impl = gobject.ext.defineProperty(name, Self, bool, .{
@@ -322,6 +330,7 @@ pub const Window = extern struct {
         session_name: ?[:0]const u8 = null,
         session_hash: ?u64 = null,
         session_menu: ?*gio.Menu = null,
+        toolbar_visible_override: ?bool = null,
 
         // Template bindings
         tab_overview: *adw.TabOverview,
@@ -457,6 +466,7 @@ pub const Window = extern struct {
             // TODO: accept the surface that toggled the command palette
             .init("toggle-command-palette", actionToggleCommandPalette, null),
             .init("toggle-tab-overview", actionToggleTabOverview, null),
+            .init("toggle-toolbar", actionToggleToolbar, null),
             .init("toggle-inspector", actionToggleInspector, null),
         };
 
@@ -687,6 +697,21 @@ pub const Window = extern struct {
         tab_overview.setOpen(@intFromBool(!is_open));
     }
 
+    pub fn toggleToolbar(self: *Self) void {
+        self.private().toolbar_visible_override = !self.getToolbarVisible();
+        self.as(gobject.Object).notifyByPspec(properties.@"toolbar-visible".impl.param_spec);
+        // A toggle from a menu or the palette must leave keyboard input in
+        // the terminal, including when its former toolbar widget is hidden.
+        if (self.getActiveSurface()) |surface| surface.grabFocus();
+    }
+
+    fn getToolbarVisible(self: *Self) bool {
+        const priv = self.private();
+        if (priv.toolbar_visible_override) |value| return value;
+        const config = priv.config orelse return true;
+        return config.get().@"gtk-toolbar-visible";
+    }
+
     /// Toggle the visible property.
     pub fn toggleVisibility(self: *Self) void {
         const widget = self.as(gtk.Widget);
@@ -750,6 +775,7 @@ pub const Window = extern struct {
             "tabs-visible",
             "tabs-wide",
             "toolbar-style",
+            "toolbar-visible",
             "titlebar-style",
         }) |key| {
             self.as(gobject.Object).notifyByPspec(
@@ -1451,6 +1477,7 @@ pub const Window = extern struct {
         self: *Self,
     ) callconv(.c) void {
         const priv = self.private();
+        priv.toolbar_visible_override = null;
         if (priv.config) |config_obj| {
             const config = config_obj.get();
             if (config.@"app-notifications".@"config-reload") {
@@ -2574,6 +2601,10 @@ pub const Window = extern struct {
         self.toggleTabOverview();
     }
 
+    fn actionToggleToolbar(_: *gio.SimpleAction, _: ?*glib.Variant, self: *Self) callconv(.c) void {
+        self.toggleToolbar();
+    }
+
     /// Toggle the Ghostty inspector for the active surface.
     fn toggleInspector(self: *Self) void {
         const surface = self.getActiveSurface() orelse return;
@@ -2631,6 +2662,7 @@ pub const Window = extern struct {
                 properties.@"tabs-visible".impl,
                 properties.@"tabs-wide".impl,
                 properties.@"toolbar-style".impl,
+                properties.@"toolbar-visible".impl,
                 properties.@"titlebar-style".impl,
                 properties.@"title-override".impl,
             });

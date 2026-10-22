@@ -46,6 +46,26 @@ and fading remain in use.
 Chrome colors continue to follow `window-theme`. Visibility remains controlled
 by the existing titlebar and tab-bar options.
 
+## Hiding toolbars
+
+Use the binding action to toggle the headerbar and tab bar in the current
+window:
+
+```ini
+keybind = ctrl+shift+b=toggle_toolbar
+```
+
+The binding is configurable and has no default shortcut. The command palette's
+“Toggle Toolbar” command and the terminal context menu's “Show/Hide Toolbar”
+item remain available when toolbars are hidden. The main menu also has the
+same toggle. Terminal keyboard focus is retained after toggling.
+
+To start with toolbars hidden, add `gtk-toolbar-visible = false`. Visibility
+toggles are temporary per-window overrides; reloading config and creating new
+windows use the configured value. Showing a toolbar respects the existing
+headerbar and tab visibility options. Both top and bottom toolbars are covered;
+window-manager decorations are controlled separately. This feature is GTK only.
+
 ## Storage
 
 `$XDG_STATE_HOME/ghostty/sessions/<application-id>/` contains one `<id>.json`

@@ -3855,6 +3855,19 @@ else
 /// Changes take effect when the configuration is reloaded. GTK only.
 @"gtk-tabs-style": GtkTabsStyle = .native,
 
+/// Whether GTK window toolbars are shown initially. Set to `false` to hide
+/// the headerbar and tab bar, leaving more room for the terminal. Window-manager
+/// decorations are controlled separately by `window-decoration`.
+///
+/// Use the `toggle_toolbar` binding action to show or hide the toolbars in
+/// the current window, for example `keybind = ctrl+shift+b=toggle_toolbar`.
+/// The command palette and terminal context menu also expose this action.
+///
+/// Toggling applies to the current window until configuration is reloaded.
+/// A reload or a new window uses this setting again. Showing toolbars still
+/// respects the titlebar style and `window-show-tab-bar`. GTK only.
+@"gtk-toolbar-visible": bool = true,
+
 /// If this is `true`, the titlebar will be hidden when the window is maximized,
 /// and shown when the titlebar is unmaximized. GTK only.
 ///

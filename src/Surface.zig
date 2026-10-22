@@ -5598,6 +5598,12 @@ pub fn performBindingAction(self: *Surface, action: input.Binding.Action) !bool 
             {},
         ),
 
+        .toggle_toolbar => {
+            if (comptime @hasDecl(apprt.Surface, "toggleToolbar"))
+                return self.rt_surface.toggleToolbar();
+            return false;
+        },
+
         .toggle_window_float_on_top => return try self.rt_app.performAction(
             .{ .surface = self },
             .float_window,
