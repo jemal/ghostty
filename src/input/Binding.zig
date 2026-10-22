@@ -602,6 +602,9 @@ pub const Action = union(enum) {
     /// Only supported by the GTK runtime.
     toggle_toolbar,
 
+    /// Preview installed themes in the current window (GTK only).
+    pick_theme,
+
     /// Change the title of the current focused surface via a pop-up prompt.
     prompt_surface_title,
 
@@ -1472,6 +1475,7 @@ pub const Action = union(enum) {
             .move_tab_to_new_window,
             .toggle_tab_overview,
             .toggle_toolbar,
+            .pick_theme,
             .new_split,
             .goto_split,
             .move_split,

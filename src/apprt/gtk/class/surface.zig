@@ -655,6 +655,7 @@ pub const Surface = extern struct {
         /// size GTK will allocate for this widget beforehand. This will
         /// then be realized when the widget itself is realized.
         core_surface: ?*CoreSurface = null,
+        theme_override: bool = false,
 
         /// Cached metrics for libghostty callbacks
         size: apprt.SurfaceSize,
@@ -2262,6 +2263,19 @@ pub const Surface = extern struct {
         return self.private().mapped;
     }
 
+    /// Apply window colors while keeping this surface's original configuration.
+    pub fn applyTheme(self: *Self, appearance: ?configpkg.Config.ThemeAppearance) !void {
+        const priv = self.private();
+        const core_surface = priv.core_surface orelse return;
+        if (appearance == null and !priv.theme_override) return;
+        const original = priv.config orelse return;
+        var config = original.get().shallowClone(Application.default().allocator());
+        defer config.deinit();
+        if (appearance) |value| value.apply(&config);
+        try core_surface.updateTheme(&config);
+        priv.theme_override = appearance != null;
+    }
+
     /// Change the configuration for this surface.
     pub fn setConfig(self: *Self, config: *Config) void {
         const priv = self.private();
@@ -3650,6 +3664,9 @@ pub const Surface = extern struct {
             try wd_val.finalize(config_alloc);
             config.@"working-directory" = wd_val;
         }
+
+        if (ext.getAncestor(Window, self.as(gtk.Widget))) |window|
+            window.applyThemeToConfig(&config);
 
         const content_scale = self.getContentScale();
         log.info("surface content scale: x={d} y={d} dpi={}x{} font_size={}", .{

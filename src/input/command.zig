@@ -453,6 +453,12 @@ fn actionCommands(action: Action.Key) []const Command {
             .description = i18n.N_("Toggle the tab overview."),
         }},
 
+        .pick_theme => comptime &.{.{
+            .action = .pick_theme,
+            .title = i18n.N_("Pick Theme…"),
+            .description = i18n.N_("Preview and choose a theme for this window (GTK only)."),
+        }},
+
         .toggle_toolbar => comptime &.{.{
             .action = .toggle_toolbar,
             .title = i18n.N_("Toggle Toolbar"),

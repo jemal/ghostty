@@ -20,6 +20,9 @@ empty: *gtk.Label,
 rows: []Row,
 callback: *const fn (?usize, *anyopaque) void,
 userdata: *anyopaque,
+selection_callback: ?*const fn (?usize, *anyopaque) void = null,
+last_selection: ?usize = null,
+keys: ?*gtk.EventControllerKey = null,
 anchor: ?placement.Rect = null,
 anchor_overlay: ?*gtk.Overlay = null,
 anchor_handler: c_ulong = 0,
@@ -122,8 +125,10 @@ pub fn init(self: *Self, alloc: std.mem.Allocator, request: protocol.Request, ca
     const keys = gtk.EventControllerKey.new();
     keys.as(gtk.EventController).setPropagationPhase(.capture);
     _ = gtk.EventControllerKey.signals.key_pressed.connect(keys, *Self, keyPressed, self, .{});
+    self.keys = keys;
     widget.addController(keys.as(gtk.EventController));
     list.selectRow(rows[0].widget);
+    _ = gtk.ListBox.signals.row_selected.connect(list, *Self, rowSelected, self, .{});
 }
 
 /// Snapshot the cursor once; filtering and background terminal output must not
@@ -169,6 +174,18 @@ fn position(overlay: *gtk.Overlay, widget: *gtk.Widget, allocation: *gdk.Rectang
 }
 
 pub fn deinit(self: *Self) void {
+    // GTK can retain widgets until the current input event unwinds. Disconnect
+    // every callback before freeing our model or its containing controller.
+    var objects = [_]*gobject.Object{ self.search.as(gobject.Object), self.list.as(gobject.Object), self.keys.?.as(gobject.Object) };
+    for (&objects) |object| _ = gobject.signalHandlersDisconnectMatched(
+        object,
+        .{ .data = true },
+        0,
+        0,
+        null,
+        null,
+        self,
+    );
     if (self.anchor_overlay) |overlay| {
         gobject.signalHandlerDisconnect(overlay.as(gobject.Object), self.anchor_handler);
         overlay.unref();
@@ -191,6 +208,19 @@ fn changed(_: *gtk.Editable, self: *Self) callconv(.c) void {
     self.scroll.getVadjustment().setValue(0);
     self.empty.as(gtk.Widget).setVisible(@intFromBool(first == null));
 }
+fn rowSelected(_: *gtk.ListBox, row: ?*gtk.ListBoxRow, self: *Self) callconv(.c) void {
+    var index: ?usize = null;
+    if (row) |r| for (self.rows, 0..) |entry, i| {
+        if (entry.widget == r) {
+            index = i;
+            break;
+        }
+    };
+    if (index == self.last_selection) return;
+    self.last_selection = index;
+    if (self.selection_callback) |callback| callback(index, self.userdata);
+}
+
 fn activated(_: *gtk.SearchEntry, self: *Self) callconv(.c) void {
     rowActivated(self.list, self.list.getSelectedRow() orelse return, self);
 }

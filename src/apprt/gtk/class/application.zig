@@ -2411,7 +2411,12 @@ const Action = struct {
         defer config_obj.unref();
 
         switch (target) {
-            .surface => |core| core.rt_surface.surface.setConfig(config_obj),
+            .surface => |core| {
+                const surface = core.rt_surface.surface;
+                surface.setConfig(config_obj);
+                if (ext.getAncestor(Window, surface.as(gtk.Widget))) |window|
+                    if (window.themeAppearance()) |appearance| try surface.applyTheme(appearance);
+            },
             .app => self.setConfig(config_obj),
         }
     }
@@ -2995,6 +3000,14 @@ const Action = struct {
             break :config try .new(alloc, &config);
         };
         defer config.unref();
+
+        if (!opts.soft) {
+            var windows: ?*glib.List = self.as(gtk.Application).getWindows();
+            while (windows) |link| : (windows = link.f_next) {
+                if (gobject.ext.cast(Window, @as(*gtk.Window, @ptrCast(@alignCast(link.f_data orelse continue))))) |window|
+                    window.clearTheme();
+            }
+        }
 
         // Update the proper target. This will trigger a `config_change`
         // apprt action which will propagate the config properly to our

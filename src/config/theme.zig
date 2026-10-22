@@ -270,3 +270,34 @@ pub fn openAbsolute(
         return null;
     };
 }
+
+/// Shared, non-TUI theme discovery. The caller owns all storage through alloc.
+pub const Entry = struct { name: []const u8, location: Location };
+pub fn list(alloc: Allocator) ![]Entry {
+    var result: std.ArrayList(Entry) = .empty;
+    var seen: std.StringHashMap(void) = .init(alloc);
+    defer seen.deinit();
+    var locations: LocationIterator = .{ .arena_alloc = alloc };
+    while (try locations.next()) |loc| {
+        var dir = std.Io.Dir.cwd().openDir(global.io(), loc.dir, .{ .iterate = true }) catch |err| switch (err) {
+            error.FileNotFound, error.AccessDenied => continue,
+            else => return err,
+        };
+        defer dir.close(global.io());
+        var entries = dir.iterate();
+        while (try entries.next(global.io())) |entry| {
+            if (entry.kind != .file and entry.kind != .sym_link) continue;
+            if (std.mem.eql(u8, entry.name, ".DS_Store") or !std.unicode.utf8ValidateSlice(entry.name)) continue;
+            if (seen.contains(entry.name)) continue;
+            const name = try alloc.dupe(u8, entry.name);
+            try seen.put(name, {});
+            try result.append(alloc, .{ .name = name, .location = loc.location });
+        }
+    }
+    std.mem.sort(Entry, result.items, {}, struct {
+        fn less(_: void, a: Entry, b: Entry) bool {
+            return std.ascii.orderIgnoreCase(a.name, b.name) == .lt;
+        }
+    }.less);
+    return result.toOwnedSlice(alloc);
+}

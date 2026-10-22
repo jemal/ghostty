@@ -32,6 +32,15 @@ pub fn sessionSnapshot(self: *Self) ?[]const u8 {
     return self.surface.sessionSnapshot();
 }
 
+pub fn pickTheme(self: *Self) bool {
+    const window = @import("ext.zig").getAncestor(
+        @import("class/window.zig").Window,
+        self.surface.as(@import("gtk").Widget),
+    ) orelse return false;
+    window.pickTheme();
+    return true;
+}
+
 pub fn toggleToolbar(self: *Self) bool {
     const window = @import("ext.zig").getAncestor(
         @import("class/window.zig").Window,

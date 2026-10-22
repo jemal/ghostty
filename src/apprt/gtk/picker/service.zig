@@ -7,6 +7,8 @@ const gtk = @import("gtk");
 const global = @import("../../../global.zig");
 const Application = @import("../class/application.zig").Application;
 const Surface = @import("../class/surface.zig").Surface;
+const Window = @import("../class/window.zig").Window;
+const ext = @import("../ext.zig");
 const WeakRef = @import("../weak_ref.zig").WeakRef;
 const List = @import("list.zig");
 const protocol = @import("protocol.zig");
@@ -85,6 +87,20 @@ pub fn cancelSurface(self: *Self, surface: *Surface, reason: []const u8) void {
     while (i < self.requests.items.len) {
         const entry = self.requests.items[i];
         if (entry.surface_identity == surface) self.finish(entry, null, reason, false) else i += 1;
+    }
+}
+
+pub fn cancelWindow(self: *Self, window: *Window) void {
+    var i: usize = 0;
+    while (i < self.requests.items.len) {
+        const entry = self.requests.items[i];
+        const surface = entry.surface.get() orelse {
+            i += 1;
+            continue;
+        };
+        const owner = ext.getAncestor(Window, surface.as(gtk.Widget));
+        surface.unref();
+        if (owner == window) self.finish(entry, null, "replaced", false) else i += 1;
     }
 }
 
@@ -199,6 +215,7 @@ pub fn switchSession(self: *Self, surface: *Surface) !void {
 /// session provider; external clients never receive an internal-action field.
 fn present(self: *Self, surface: *Surface, parsed: std.json.Parsed(protocol.Request), sender: []const u8, invocation: ?*gio.DBusMethodInvocation) !void {
     const request = parsed.value;
+    if (ext.getAncestor(Window, surface.as(gtk.Widget))) |window| window.cancelThemePicker();
     if (surface.hasChildExited()) return error.ChildExited;
     for (self.requests.items) |entry| {
         if (sender.len > 0 and std.mem.eql(u8, entry.sender, sender) and std.mem.eql(u8, entry.request.value.request_id, request.request_id)) return error.DuplicateRequest;

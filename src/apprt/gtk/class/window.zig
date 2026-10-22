@@ -33,6 +33,8 @@ const Overrides = @import("Overrides.zig");
 const sessions = @import("../session.zig");
 const global = @import("../../../global.zig");
 
+const ThemePicker = @import("../theme_picker.zig");
+
 const log = std.log.scoped(.gtk_ghostty_window);
 
 pub const Window = extern struct {
@@ -334,6 +336,9 @@ pub const Window = extern struct {
         session_menu: ?*gio.Menu = null,
         toolbar_visible_override: ?bool = null,
 
+        theme: ThemePicker.State = .{},
+        theme_overlay: *gtk.Overlay,
+
         // Template bindings
         tab_overview: *adw.TabOverview,
         tab_bar: *adw.TabBar,
@@ -374,6 +379,13 @@ pub const Window = extern struct {
         // If our configuration is null then we get the configuration
         // from the application.
         const priv = self.private();
+        priv.theme_overlay = gtk.Overlay.new();
+        // The whole tab content hosts the picker, rather than a single pane.
+        _ = priv.tab_view.as(gobject.Object).ref();
+        priv.toast_overlay.setChild(null);
+        priv.theme_overlay.setChild(priv.tab_view.as(gtk.Widget));
+        priv.toast_overlay.setChild(priv.theme_overlay.as(gtk.Widget));
+        priv.tab_view.as(gobject.Object).unref();
 
         const config = config: {
             if (priv.config) |config| break :config config.get();
@@ -471,6 +483,7 @@ pub const Window = extern struct {
             // TODO: accept the surface that toggled the command palette
             .init("toggle-command-palette", actionToggleCommandPalette, null),
             .init("toggle-tab-overview", actionToggleTabOverview, null),
+            .init("pick-theme", actionPickTheme, null),
             .init("toggle-toolbar", actionToggleToolbar, null),
             .init("toggle-inspector", actionToggleInspector, null),
         };
@@ -880,6 +893,7 @@ pub const Window = extern struct {
         var it = tree.iterator();
         while (it.next()) |entry| {
             const surface = entry.view;
+            surface.applyTheme(priv.theme.appearance) catch |err| log.warn("applying window theme: {}", .{err});
             // Before adding any new signal handlers, disconnect any that we may
             // have added before. Otherwise we may get multiple handlers for the
             // same signal.
@@ -893,6 +907,7 @@ pub const Window = extern struct {
                 self,
             );
 
+            _ = Surface.signals.init.connect(surface, *Self, themeSurfaceInitialized, self, .{});
             _ = Surface.signals.@"present-request".connect(
                 surface,
                 *Self,
@@ -1855,6 +1870,7 @@ pub const Window = extern struct {
 
     fn dispose(self: *Self) callconv(.c) void {
         const priv = self.private();
+        priv.theme.deinit(self);
 
         if (priv.handle_active_state_source) |v| {
             if (glib.Source.remove(v) == 0) {
@@ -2237,6 +2253,8 @@ pub const Window = extern struct {
         // We need to get the tab to disconnect the signals.
         const child = page.getChild();
         const tab = gobject.ext.cast(Tab, child) orelse return;
+        self.cancelThemePicker();
+
         _ = gobject.signalHandlersDisconnectMatched(
             tab.as(gobject.Object),
             .{ .data = true },
@@ -2423,6 +2441,11 @@ pub const Window = extern struct {
         // We react to the changes in the propMaximized callback
     }
 
+    fn themeSurfaceInitialized(surface: *Surface, self: *Self) callconv(.c) void {
+        if (self.themeAppearance()) |appearance|
+            surface.applyTheme(appearance) catch |err| log.warn("initializing pane theme: {}", .{err});
+    }
+
     fn surfaceInit(
         surface: *Surface,
         self: *Self,
@@ -2533,6 +2556,36 @@ pub const Window = extern struct {
         self: *Window,
     ) callconv(.c) void {
         self.performBindingAction(.new_window);
+    }
+
+    pub fn themeConfig(self: *Self) *const configpkg.Config {
+        return self.private().config.?.get();
+    }
+
+    pub fn applyThemeToConfig(self: *Self, config: *configpkg.Config) void {
+        if (self.private().theme.appearance) |appearance| appearance.apply(config);
+    }
+
+    pub fn themeAppearance(self: *Self) ?configpkg.Config.ThemeAppearance {
+        return self.private().theme.appearance;
+    }
+
+    pub fn cancelThemePicker(self: *Self) void {
+        self.private().theme.cancel();
+    }
+    pub fn clearTheme(self: *Self) void {
+        self.private().theme.clear(self);
+    }
+
+    pub fn pickTheme(self: *Self) void {
+        self.private().theme.open(self, self.private().theme_overlay) catch |err| {
+            log.warn("opening theme picker: {}", .{err});
+            self.addToast(i18n._("Unable to open theme picker"));
+        };
+    }
+
+    fn actionPickTheme(_: *gio.SimpleAction, _: ?*glib.Variant, self: *Self) callconv(.c) void {
+        self.pickTheme();
     }
 
     fn actionNewTab(

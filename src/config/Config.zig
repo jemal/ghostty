@@ -4085,6 +4085,9 @@ _conditional_set: std.EnumSet(conditional.Key) = .{},
 /// as loadTheme which has more details on why.
 _replay_steps: std.ArrayList(Replay.Step) = .empty,
 
+/// Prefix contributed by the loaded theme, before explicit configuration.
+_theme_replay_len: usize = 0,
+
 /// Set to true if Ghostty was executed as xdg-terminal-exec on Linux.
 @"_xdg-terminal-exec": bool = false,
 
@@ -4633,7 +4636,7 @@ pub fn changeConditionalState(
     new_config._conditional_state = new;
 
     // Replay all of our steps to rebuild the configuration
-    var it = Replay.iterator(self._replay_steps.items, &new_config);
+    var it = Replay.iterator(self._replay_steps.items[self._theme_replay_len..], &new_config);
     try new_config.loadIter(alloc_gpa, &it);
     try new_config.finalize();
 
@@ -4696,6 +4699,75 @@ fn expandHome(path: []const u8, buf: []u8) []const u8 {
         log.warn("failed to expand home directory in path \"{s}\": {}", .{ path, err });
         return path;
     };
+}
+
+/// Color-only, allocation-free window appearance. Non-theme settings are never
+/// changed by applying this value to a surface configuration.
+pub const ThemeAppearance = struct {
+    background: Color,
+    foreground: Color,
+    palette: Palette,
+    @"cursor-color": ?TerminalColor,
+    @"cursor-text": ?TerminalColor,
+    @"selection-foreground": ?TerminalColor,
+    @"selection-background": ?TerminalColor,
+    @"unfocused-split-fill": ?Color,
+    @"split-divider-color": ?Color,
+    @"window-titlebar-background": ?Color,
+    @"window-titlebar-foreground": ?Color,
+
+    pub fn capture(config: *const Config) ThemeAppearance {
+        var value: ThemeAppearance = undefined;
+        inline for (@typeInfo(ThemeAppearance).@"struct".field_names) |field|
+            @field(value, field) = @field(config, field);
+        return value;
+    }
+
+    pub fn apply(value: ThemeAppearance, config: *Config) void {
+        inline for (@typeInfo(ThemeAppearance).@"struct".field_names) |field|
+            @field(config, field) = @field(value, field);
+    }
+
+    fn isArgument(arg: []const u8) bool {
+        const trimmed = std.mem.trimStart(u8, arg, "-");
+        const key = trimmed[0 .. std.mem.indexOfScalar(u8, trimmed, '=') orelse trimmed.len];
+        inline for (@typeInfo(ThemeAppearance).@"struct".field_names) |field|
+            if (std.mem.eql(u8, key, field)) return true;
+        return false;
+    }
+};
+
+/// Resolve a candidate from defaults, its own file, and explicit color inputs.
+/// In particular, never layer a candidate over the previously loaded theme.
+pub fn themeAppearance(self: *const Config, name: []const u8) !ThemeAppearance {
+    const alloc = self._arena.?.child_allocator;
+    var candidate = try self.cloneEmpty(alloc);
+    defer candidate.deinit();
+    const file = (try themepkg.open(candidate.arenaAlloc(), name, &candidate._diagnostics)) orelse return error.InvalidTheme;
+    defer file.file.close(global.io());
+    var buffer: [4096]u8 = undefined;
+    var reader = file.file.reader(global.io(), &buffer);
+    var lines: cli.args.LineIterator = .{ .r = &reader.interface, .filepath = file.path };
+    try candidate.loadIter(alloc, &lines);
+    if (!candidate._diagnostics.empty()) return error.InvalidTheme;
+
+    // Only appearance arguments from the user's config are relevant. In
+    // particular, do not replay -e or reload fonts, commands, and keybindings.
+    var steps: std.ArrayList(Replay.Step) = .empty;
+    defer steps.deinit(alloc);
+    for (self._replay_steps.items[self._theme_replay_len..]) |step| {
+        const arg = switch (step) {
+            .arg => |v| v,
+            .conditional_arg => |v| v.arg,
+            .@"-e" => break,
+            else => continue,
+        };
+        if (ThemeAppearance.isArgument(arg)) try steps.append(alloc, step);
+    }
+    var replay = Replay.iterator(steps.items, &candidate);
+    try candidate.loadIter(alloc, &replay);
+    if (!candidate._diagnostics.empty()) return error.InvalidTheme;
+    return .capture(&candidate);
 }
 
 fn loadTheme(self: *Config, theme: Theme) !void {
@@ -4784,9 +4856,11 @@ fn loadTheme(self: *Config, theme: Theme) !void {
         }
     }
 
+    new_config._theme_replay_len = new_config._replay_steps.items.len;
+
     // Replay our previous inputs so that we can override values
     // from the theme.
-    var slice_it = Replay.iterator(self._replay_steps.items, &new_config);
+    var slice_it = Replay.iterator(self._replay_steps.items[self._theme_replay_len..], &new_config);
     try new_config.loadIter(alloc_gpa, &slice_it);
 
     // Success, swap our new config in and free the old.
@@ -5284,6 +5358,8 @@ pub fn clone(
         );
     }
     assert(result._replay_steps.items.len == self._replay_steps.items.len);
+
+    result._theme_replay_len = self._theme_replay_len;
 
     // Copy the conditional set
     result._conditional_set = self._conditional_set;
@@ -11428,4 +11504,61 @@ test "compatibility: window new-window" {
             cfg.@"macos-dock-drop-behavior",
         );
     }
+}
+
+test "theme appearance replaces theme colors and preserves explicit overrides" {
+    const testing = std.testing;
+    const alloc = testing.allocator;
+    var td = try internal_os.TempDir.init();
+    defer td.deinit();
+    const contents = [_][]const u8{
+        "background = #112233\nforeground = #445566\npalette = 1=#abcdef\nselection-background = #123456\n",
+        "background = #778899\nfont-size = 99\ncommand = /bin/false\n",
+        "background = definitely-not-a-color\n",
+    };
+    const names = [_][]const u8{ "original", "candidate", "invalid" };
+    for (contents, names) |content, name| {
+        var file = try td.dir.createFile(testing.io, name, .{});
+        defer file.close(testing.io);
+        var buffer: [1024]u8 = undefined;
+        var writer = file.writer(testing.io, &buffer);
+        try writer.interface.writeAll(content);
+        try writer.end();
+    }
+    var arena: ArenaAllocator = .init(alloc);
+    defer arena.deinit();
+    var path_buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const original = try arena.allocator().dupe(u8, path_buffer[0..try td.dir.realPathFile(testing.io, "original", &path_buffer)]);
+    const candidate = try arena.allocator().dupe(u8, path_buffer[0..try td.dir.realPathFile(testing.io, "candidate", &path_buffer)]);
+    const invalid = try arena.allocator().dupe(u8, path_buffer[0..try td.dir.realPathFile(testing.io, "invalid", &path_buffer)]);
+    var config = try Config.default(alloc);
+    defer config.deinit();
+    var it: TestIterator = .{ .data = &.{
+        try arena.allocator().print("--theme={s}", .{original}),
+        "--foreground=#aabbcc",
+        "--palette=2=#fedcba",
+        "--cursor-color=cell-foreground",
+        "--font-size=13",
+    } };
+    try config.loadIter(alloc, &it);
+    try config.finalize();
+    const before = ThemeAppearance.capture(&config);
+    var applied = try config.clone(alloc);
+    defer applied.deinit();
+    const appearance = try applied.themeAppearance(candidate);
+    appearance.apply(&applied);
+    try testing.expectEqual(Color{ .r = 0x77, .g = 0x88, .b = 0x99 }, applied.background);
+    try testing.expectEqual(config.foreground, applied.foreground);
+    try testing.expectEqual((Palette{}).value[1], applied.palette.value[1]);
+    try testing.expectEqual(config.palette.value[2], applied.palette.value[2]);
+    try testing.expectEqual(@as(?TerminalColor, .@"cell-foreground"), applied.@"cursor-color");
+    try testing.expectEqual(@as(?TerminalColor, null), applied.@"selection-background");
+    try testing.expectEqual(config.@"font-size", applied.@"font-size");
+    try testing.expect(deepEqual(@TypeOf(config.command), config.command, applied.command));
+    try testing.expectError(error.InvalidTheme, config.themeAppearance(invalid));
+    try testing.expectEqualDeep(before, ThemeAppearance.capture(&config));
+    // Cancellation and repeated candidate resolution never contaminate the baseline.
+    before.apply(&applied);
+    try testing.expectEqualDeep(before, ThemeAppearance.capture(&applied));
+    try testing.expectEqualDeep(appearance, try config.themeAppearance(candidate));
 }

@@ -45,6 +45,36 @@ all snapshot generations belonging to that session. Delete is disabled for
 open sessions; Archive and Close is the explicit way to stop a running session.
 The app finishes pending saves before modifying storage.
 
+## Live theme picker
+
+Use **Pick Theme…** in the main menu or command palette. A user-selected
+shortcut can invoke the GTK-only action:
+
+```ini
+keybind = ctrl+shift+p=pick_theme
+```
+
+The centered picker lists bundled and user themes (user themes take precedence
+for duplicate names). Search and navigate with Up/Down or Tab/Shift+Tab to
+preview colors across all panes in the current window. Enter or clicking a
+result keeps it; Escape or moving focus outside the picker restores the
+previous appearance. Opening does not change colors, and no matches cannot be
+accepted. Invalid theme files leave the last valid preview visible and show
+an error in the picker.
+
+The choice is runtime-only and window-scoped. New tabs and splits follow it;
+other windows keep their own colors. **Configured theme** returns to the
+configured theme, including automatic light/dark selection. Explicit user
+color overrides still win, and theme files cannot change fonts, commands, or
+bindings through this picker. With `window-theme = ghostty`, the chrome follows
+the preview too; other window theme modes retain desktop colors.
+
+A hard config reload clears runtime choices. Closing the app does not save
+them to config or session files. The public `+pick` protocol remains unchanged.
+Validation uses builds, focused theme logic tests, and user review of the live
+preview; isolated X11 screenshot testing is currently paused at the user's
+request.
+
 ## CLI tab creation
 
 Create a tab in an existing GTK instance with a directory and command:

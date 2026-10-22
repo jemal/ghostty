@@ -1802,6 +1802,32 @@ fn notifyConfigConditionalState(self: *Surface) void {
 /// Update our configuration at runtime. This can be called by the apprt
 /// to set a surface-specific configuration that differs from the app
 /// or other surfaces.
+/// Update renderer and terminal colors without changing bindings, fonts, titles,
+/// or runtime property bindings. The caller supplies the unchanged non-color config.
+pub fn updateTheme(self: *Surface, config: *const configpkg.Config) !void {
+    // We need to store our configs in a heap-allocated pointer so that
+    // our messages aren't huge.
+    var renderer_message = try rendererpkg.Message.initChangeConfig(self.alloc, config);
+    errdefer renderer_message.deinit();
+    var termio_config_ptr = try self.alloc.create(termio.Termio.DerivedConfig);
+    errdefer self.alloc.destroy(termio_config_ptr);
+    termio_config_ptr.* = try termio.Termio.DerivedConfig.init(self.alloc, config);
+    errdefer termio_config_ptr.deinit();
+
+    _ = self.renderer_thread.mailbox.push(global.io(), renderer_message, .{ .forever = {} });
+    self.queueIo(.{
+        .change_config = .{
+            .alloc = self.alloc,
+            .ptr = termio_config_ptr,
+        },
+    }, .unlocked);
+
+    // With mailbox messages sent, we have to wake them up so they process it.
+    self.queueRender() catch |err| {
+        log.warn("failed to notify renderer of config change err={}", .{err});
+    };
+}
+
 pub fn updateConfig(
     self: *Surface,
     original: *const configpkg.Config,
@@ -5603,6 +5629,12 @@ pub fn performBindingAction(self: *Surface, action: input.Binding.Action) !bool 
             .toggle_tab_overview,
             {},
         ),
+
+        .pick_theme => {
+            if (comptime @hasDecl(apprt.Surface, "pickTheme"))
+                return self.rt_surface.pickTheme();
+            return false;
+        },
 
         .toggle_toolbar => {
             if (comptime @hasDecl(apprt.Surface, "toggleToolbar"))
