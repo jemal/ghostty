@@ -2192,7 +2192,11 @@ keybind: Keybinds = .{},
 ///   * `light` - Use the light theme regardless of system theme.
 ///   * `dark` - Use the dark theme regardless of system theme.
 ///   * `ghostty` - Use the background and foreground colors specified in the
-///     Ghostty configuration. This is only supported on Linux builds.
+///     Ghostty configuration. On GTK, chrome surfaces mix these colors to
+///     distinguish the title/tab bar, selected tabs, and popovers. Accents use
+///     ANSI bright blue (palette entry 12). An explicit
+///     `window-titlebar-background` overrides the title/tab bar color exactly.
+///     This is only supported on Linux builds.
 ///
 /// On macOS, if `macos-titlebar-style` is `tabs` or `transparent`, the window theme will be
 /// automatically set based on the luminosity of the terminal background color.

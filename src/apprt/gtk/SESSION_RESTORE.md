@@ -84,6 +84,16 @@ tabs more room. Long session names are shortened in the strip and remain fully
 visible in their tooltip. Tab tooltips show the full title and working
 directory, including when the title fades to fit the available width.
 
+With `window-theme = ghostty`, the title/tab bar mixes 5% of the configured
+foreground into the background. The compact rail uses the same mix, while
+selected tabs use 12% and popovers, dialogs, and the native picker use an 8%
+raised surface. Accents come from ANSI bright blue (palette entry 12), with
+soft selection fills and the configured foreground for selection text. These
+colors follow configuration reload, not pane focus or application-driven
+terminal palette changes. An explicit `window-titlebar-background` keeps its
+exact color for the title/tab bar. Other window theme modes retain desktop
+colors.
+
 Compact tabs use regular inactive titles and medium-weight selected titles
 and session names. The interface font and size follow the desktop by default;
 `window-title-font-family` overrides the font family for both the headerbar and

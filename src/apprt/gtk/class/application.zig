@@ -948,8 +948,6 @@ pub const Application = extern struct {
         const writer = &buf.writer;
 
         const window_theme = config.@"window-theme";
-        const headerbar_background = config.@"window-titlebar-background" orelse config.background;
-        const headerbar_foreground = config.@"window-titlebar-foreground" orelse config.foreground;
 
         try writer.writeAll(
             \\/*
@@ -1038,42 +1036,8 @@ pub const Application = extern struct {
             \\
         );
 
-        switch (window_theme) {
-            .ghostty => try writer.print(
-                \\:root {{
-                \\  --ghostty-fg: rgb({d},{d},{d});
-                \\  --ghostty-bg: rgb({d},{d},{d});
-                \\  --headerbar-fg-color: var(--ghostty-fg);
-                \\  --headerbar-bg-color: var(--ghostty-bg);
-                \\  --headerbar-backdrop-color: oklab(from var(--headerbar-bg-color) calc(l * 0.9) a b / alpha);
-                \\  --overview-fg-color: var(--ghostty-fg);
-                \\  --overview-bg-color: var(--ghostty-bg);
-                \\  --popover-fg-color: var(--ghostty-fg);
-                \\  --popover-bg-color: var(--ghostty-bg);
-                \\  --window-fg-color: var(--ghostty-fg);
-                \\  --window-bg-color: var(--ghostty-bg);
-                \\}}
-                \\listview.command-palette-view {{
-                \\  --view-fg-color: var(--ghostty-fg);
-                \\  --view-bg-color: var(--ghostty-bg);
-                \\}}
-                \\windowhandle {{
-                \\  background-color: var(--headerbar-bg-color);
-                \\  color: var(--headerbar-fg-color);
-                \\}}
-                \\windowhandle:backdrop {{
-                \\ background-color: var(--headerbar-backdrop-color);
-                \\}}
-            , .{
-                headerbar_foreground.r,
-                headerbar_foreground.g,
-                headerbar_foreground.b,
-                headerbar_background.r,
-                headerbar_background.g,
-                headerbar_background.b,
-            }),
-            else => {},
-        }
+        if (window_theme == .ghostty)
+            try @import("../theme_css.zig").write(writer, config, ":root");
 
         const unfocused_fill: CoreConfig.Color = config.@"unfocused-split-fill" orelse config.background;
 
