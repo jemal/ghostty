@@ -16,34 +16,56 @@ window.ssd.no-border-radius {
  * rings. Scope these rules to the opted-in bar so overview thumbnails and
  * other application windows retain their desktop styling.
  */
-.window tabbar.compact-tabs .box > scrolledwindow {
-  margin-top: 4px;
-  margin-bottom: 4px;
-  border-radius: 28px;
+.window tabbar.compact-tabs .box scrolledwindow {
+  margin-top: 2px;
+  margin-bottom: 2px;
+  border-radius: 17px;
   background: color-mix(in srgb, currentColor 5%, transparent);
 }
 
 .window tabbar.compact-tabs tabbox {
   min-height: 32px;
-  padding-top: 2px;
-  padding-bottom: 2px;
+  padding-top: 3px;
+  padding-bottom: 3px;
 }
 
 .window tabbar.compact-tabs tabbox > tabboxchild {
-  border-radius: 28px;
+  border-radius: 14px;
 }
 
 .window tabbar.compact-tabs tabbox > separator:not(.hidden) {
-  margin-top: 8px;
-  margin-bottom: 8px;
-  opacity: 0.18;
+  margin-top: 7px;
+  margin-bottom: 7px;
+  background: color-mix(in srgb, currentColor 20%, transparent);
+  opacity: 1;
 }
 
 .window tabbar.compact-tabs tab {
-  min-height: 28px;
-  padding: 2px 8px;
-  border-radius: 28px;
+  min-height: 26px;
+  padding: 0 6px;
+  border-radius: 14px;
   background: transparent;
+}
+
+.window tabbar.compact-tabs .box {
+  padding: 0;
+}
+
+.window tabbar.compact-tabs .start-action,
+.window tabbar.compact-tabs .end-action {
+  padding: 1px 3px;
+}
+
+.window tabbar.compact-tabs .start-action button,
+.window tabbar.compact-tabs .end-action button {
+  min-width: 24px;
+  min-height: 24px;
+  padding: 2px;
+}
+
+.window tabbar.compact-tabs tab button.image-button {
+  min-width: 20px;
+  min-height: 20px;
 }
 
 .window tabbar.compact-tabs tab .tab-title {
@@ -85,8 +107,8 @@ window.ssd.no-border-radius {
 }
 
 .window tabbar.compact-tabs .session-selector > button {
-  min-height: 28px;
-  padding: 2px 8px;
+  min-height: 26px;
+  padding: 0 6px;
   border-radius: 28px;
   font-weight: 500;
   background: transparent;
@@ -320,4 +342,40 @@ label.resize-overlay {
    */
   margin: 0;
   padding: 0;
+}
+
+/* Search-first pane picker: compact rows and a clear selection. */
+.native-picker {
+  padding: 5px;
+  border: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+  border-radius: 12px;
+  background: var(--window-bg-color);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+}
+
+.native-picker entry.search {
+  margin: 0;
+  background: color-mix(in srgb, currentColor 6%, transparent);
+  border: none;
+  border-radius: 7px;
+  box-shadow: none;
+}
+
+.native-picker list {
+  background: transparent;
+}
+
+.native-picker row {
+  margin: 1px 0;
+  padding: 0;
+  border-radius: 6px;
+}
+
+.native-picker row:hover {
+  background: color-mix(in srgb, currentColor 6%, transparent);
+}
+
+.native-picker row:selected {
+  background: var(--accent-bg-color);
+  color: var(--accent-fg-color);
 }

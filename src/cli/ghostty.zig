@@ -24,6 +24,7 @@ const new_window = @import("new_window.zig");
 const new_tab = @import("new_tab.zig");
 const toggle_quick_terminal = @import("toggle_quick_terminal.zig");
 const global = @import("../global.zig");
+const pick = @import("pick.zig");
 
 /// Special commands that can be invoked via CLI flags. These are all
 /// invoked by using `+<action>` as a CLI flag. The only exception is
@@ -85,6 +86,9 @@ pub const Action = enum {
 
     // Use IPC to tell the running Ghostty to toggle the quick terminal.
     @"toggle-quick-terminal",
+
+    /// Show a pane-scoped native picker.
+    pick,
 
     pub fn detectSpecialCase(arg: []const u8) ?SpecialCase(Action) {
         // If we see a "-e" and we haven't seen a command yet, then
@@ -152,6 +156,7 @@ pub const Action = enum {
 
     fn runMain(self: Action, alloc: Allocator) !u8 {
         return switch (self) {
+            .pick => try pick.run(alloc),
             .version => try version.run(alloc),
             .help => try help.run(alloc),
             .@"list-fonts" => try list_fonts.run(alloc),
@@ -195,6 +200,7 @@ pub const Action = enum {
     pub fn options(comptime self: Action) type {
         comptime {
             return switch (self) {
+                .pick => pick.Options,
                 .version => version.Options,
                 .help => help.Options,
                 .@"list-fonts" => list_fonts.Options,

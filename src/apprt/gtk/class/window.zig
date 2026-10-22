@@ -429,6 +429,7 @@ pub const Window = extern struct {
         priv.session_menu = menu;
         menu.append(i18n._("New Session"), "win.new-session");
         menu.append(i18n._("Rename Session…"), "win.rename-session");
+        menu.append(i18n._("Switch Session…"), "win.switch-session");
         priv.session_button.setMenuModel(menu.as(gio.MenuModel));
 
         // We need to do this so that the title initializes properly,
@@ -448,6 +449,7 @@ pub const Window = extern struct {
             .init("rename-session", actionRenameSession, null),
             .init("open-session", actionOpenSession, t_variant_type),
             .init("manage-sessions", actionManageSessions, null),
+            .init("switch-session", actionSwitchSession, null),
             .init("about", actionAbout, null),
             .init("close", actionClose, null),
             .init("close-tab", actionCloseTab, s_variant_type),
@@ -794,6 +796,8 @@ pub const Window = extern struct {
         } else {
             priv.tab_bar.as(gtk.Widget).removeCssClass("compact-tabs");
         }
+
+        configureTabRail(priv.tab_bar.as(gtk.Widget), config.@"gtk-tabs-style" == .compact);
 
         // Only add a solid background if we're opaque.
         self.toggleCssClass(
@@ -1179,6 +1183,7 @@ pub const Window = extern struct {
         menu.removeAll();
         menu.append(i18n._("New Session"), "win.new-session");
         menu.append(i18n._("Rename Session…"), "win.rename-session");
+        menu.append(i18n._("Switch Session…"), "win.switch-session");
         var arena: std.heap.ArenaAllocator = .init(app.allocator());
         defer arena.deinit();
         const dir = app.sessionDir() catch return;
@@ -1194,6 +1199,15 @@ pub const Window = extern struct {
         }
         menu.appendSection(i18n._("Sessions"), saved.as(gio.MenuModel));
         menu.append(i18n._("Manage Sessions…"), "win.manage-sessions");
+    }
+
+    fn actionSwitchSession(_: *gio.SimpleAction, _: ?*glib.Variant, self: *Self) callconv(.c) void {
+        const surface = self.getActiveSurface() orelse return;
+        const service = Application.default().picker() orelse return;
+        service.switchSession(surface) catch |err| {
+            log.warn("unable to show session picker: {}", .{err});
+            self.addToast(i18n._("Unable to open session picker."));
+        };
     }
 
     fn actionManageSessions(_: *gio.SimpleAction, _: ?*glib.Variant, _: *Self) callconv(.c) void {
@@ -1480,6 +1494,72 @@ pub const Window = extern struct {
         const priv = self.private();
         const config = if (priv.config) |v| v.get() else return false;
         return config.@"gtk-tabs-inverted";
+    }
+
+    /// Give the compact rail a preferred width per tab without increasing its
+    /// minimum width. The native scroller can still compress and overflow when
+    /// the window is narrow, while short titles retain the usual tab width.
+    fn configureTabRail(widget: *gtk.Widget, compact: bool) void {
+        if (gobject.ext.cast(gtk.ScrolledWindow, widget)) |scroll| {
+            if (scroll.getChild()) |child| {
+                if (std.mem.eql(u8, std.mem.span(child.getCssName()), "tabbox")) {
+                    const pinned = widget.hasCssClass("pinned") != 0;
+                    if (pinned) {
+                        scroll.setPropagateNaturalWidth(1);
+                        widget.setHalign(if (compact) .start else .fill);
+                        return;
+                    }
+                    var rail = widget.getParent().?;
+                    if (compact and rail.hasCssClass("tab-rail-layout") == 0) {
+                        const box = gobject.ext.cast(gtk.Box, rail) orelse return;
+                        const previous = widget.getPrevSibling();
+                        const bin = adw.Bin.new();
+                        rail = bin.as(gtk.Widget);
+                        rail.addCssClass("tab-rail-layout");
+                        rail.setHexpand(1);
+                        rail.setLayoutManager(gtk.CustomLayout.new(null, tabRailMeasure, tabRailAllocate).as(gtk.LayoutManager));
+                        _ = widget.as(gobject.Object).ref();
+                        box.remove(widget);
+                        bin.setChild(widget);
+                        box.insertChildAfter(rail, previous);
+                        widget.as(gobject.Object).unref();
+                    }
+                    scroll.setPropagateNaturalWidth(0);
+                    scroll.setMinContentWidth(if (compact) 0 else 100);
+                    widget.setHalign(.fill);
+                    if (rail.hasCssClass("tab-rail-layout") != 0) {
+                        rail.setHalign(if (compact) .start else .fill);
+                        if (compact) rail.addCssClass("compact") else rail.removeCssClass("compact");
+                        rail.queueResize();
+                    }
+                    return;
+                }
+            }
+        }
+        var child = widget.getFirstChild();
+        while (child) |current| : (child = current.getNextSibling()) configureTabRail(current, compact);
+    }
+
+    fn tabRailMeasure(widget: *gtk.Widget, orientation: gtk.Orientation, for_size: c_int, minimum: *c_int, natural: *c_int, minimum_baseline: *c_int, natural_baseline: *c_int) callconv(.c) void {
+        const bin = gobject.ext.cast(adw.Bin, widget) orelse unreachable;
+        const child = bin.getChild() orelse unreachable;
+        child.measure(orientation, for_size, minimum, natural, minimum_baseline, natural_baseline);
+        if (orientation == .horizontal and widget.hasCssClass("compact") != 0) {
+            if (widget.getAncestor(Self.getGObjectType())) |ancestor| {
+                const self = gobject.ext.cast(Self, ancestor) orelse unreachable;
+                const view = self.private().tab_view;
+                const count = view.getNPages() - view.getNPinnedPages();
+                // AdwTabBar's normal non-expanding tabs are 215px, with 5px
+                // spacing between tabs and at either end of the viewport.
+                natural.* = @max(natural.*, count * 220 + 5);
+            }
+        }
+    }
+
+    fn tabRailAllocate(widget: *gtk.Widget, width: c_int, height: c_int, baseline: c_int) callconv(.c) void {
+        const bin = gobject.ext.cast(adw.Bin, widget) orelse unreachable;
+        const child = bin.getChild() orelse unreachable;
+        child.allocate(width, height, baseline, null);
     }
 
     fn getTabsWide(self: *Self) bool {

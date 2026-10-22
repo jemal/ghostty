@@ -170,6 +170,7 @@ pub const Application = extern struct {
     };
 
     const Private = struct {
+        picker_service: ?*@import("../picker/service.zig") = null,
         /// The apprt App. This is annoying that we need this it'd be
         /// nicer to just make THIS the apprt app but the current libghostty
         /// API doesn't allow that.
@@ -459,6 +460,8 @@ pub const Application = extern struct {
     /// finalizer. But applications are never fully unreferenced so this
     /// ensures that our memory is cleaned up properly.
     pub fn deinit(self: *Self) void {
+        self.stopSessionSaves();
+        self.stopPicker();
         const alloc = self.allocator();
         const priv: *Private = self.private();
         priv.config.unref();
@@ -482,6 +485,16 @@ pub const Application = extern struct {
         priv.css_provider.unref();
         for (priv.custom_css_providers.items) |provider| provider.unref();
         priv.custom_css_providers.deinit(alloc);
+    }
+
+    pub fn picker(self: *Self) ?*@import("../picker/service.zig") {
+        return self.private().picker_service;
+    }
+
+    fn stopPicker(self: *Self) void {
+        const service = self.private().picker_service orelse return;
+        self.private().picker_service = null;
+        service.destroy();
     }
 
     /// The global allocator that all other classes should use by
@@ -510,6 +523,10 @@ pub const Application = extern struct {
 
         // The final cleanup that is always required at the end of running.
         defer {
+            // Draining GTK can dispatch overdue autosave timers. Stop them and
+            // join pending work before another job can escape application cleanup.
+            self.stopSessionSaves();
+
             // Ensure our timer source is removed
             self.stopQuitTimer();
 
@@ -1356,6 +1373,11 @@ pub const Application = extern struct {
             self.as(Parent),
         );
 
+        self.private().picker_service = @import("../picker/service.zig").create(self) catch |err| blk: {
+            log.warn("native picker service unavailable: {}", .{err});
+            break :blk null;
+        };
+
         // Set ourselves as the default application.
         gio.Application.setDefault(self.as(gio.Application));
 
@@ -1589,6 +1611,15 @@ pub const Application = extern struct {
         return @intFromBool(glib.SOURCE_CONTINUE);
     }
 
+    fn stopSessionSaves(self: *Self) void {
+        const priv = self.private();
+        if (priv.session_timer) |source| {
+            _ = glib.Source.remove(source);
+            priv.session_timer = null;
+        }
+        self.finishSessionSave();
+    }
+
     fn finishSessionSave(self: *Self) void {
         const priv = self.private();
         const job = priv.session_save orelse return;
@@ -1710,12 +1741,9 @@ pub const Application = extern struct {
     }
 
     fn dispose(self: *Self) callconv(.c) void {
-        self.finishSessionSave();
+        self.stopSessionSaves();
+        self.stopPicker();
         const priv = self.private();
-        if (priv.session_timer) |source| {
-            _ = glib.Source.remove(source);
-            priv.session_timer = null;
-        }
         if (priv.config_errors_dialog.get()) |diag| {
             diag.close();
             diag.unref(); // strong ref from get()

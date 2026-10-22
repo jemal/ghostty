@@ -1506,6 +1506,7 @@ pub const Surface = extern struct {
     // Libghostty Callbacks
 
     pub fn close(self: *Self) void {
+        if (Application.default().picker()) |service| service.cancelSurface(self, "pane_closed");
         signals.@"close-request".impl.emit(
             self,
             null,
@@ -1521,6 +1522,7 @@ pub const Surface = extern struct {
         // Keep our property up to date for anyone listening.
         const priv = self.private();
         priv.child_exited = true;
+        if (Application.default().picker()) |service| service.cancelSurface(self, "child_exited");
         self.as(gobject.Object).notifyByPspec(
             properties.@"child-exited".impl.param_spec,
         );
@@ -1590,6 +1592,50 @@ pub const Surface = extern struct {
         return self.private().cursor_pos;
     }
 
+    pub fn hasChildExited(self: *Self) bool {
+        return self.private().child_exited;
+    }
+
+    /// Capture the visible terminal caret, not the mouse pointer. Render pixels
+    /// include font DPI; GTK coordinates divide only by the surface scale.
+    pub fn anchorPickerAtCursor(self: *Self, picker: *@import("../picker/list.zig")) void {
+        const priv = self.private();
+        const core_surface = priv.core_surface orelse return;
+        const point = point: {
+            core_surface.renderer_state.mutex.lockUncancelable(global.io());
+            defer core_surface.renderer_state.mutex.unlock(global.io());
+            const screen = core_surface.renderer_state.terminal.screens.active;
+            const point = screen.pages.pointFromPin(.viewport, screen.cursor.page_pin.*) orelse return;
+            if (point.viewport.y >= core_surface.size.grid().rows) return;
+            break :point point.viewport;
+        };
+        const render = priv.render_surface.as(gtk.Widget);
+        const scale = scale_util.widgetSurfaceScale(render);
+        const size = core_surface.size;
+        const x: f32 = @floatCast(@as(f64, @floatFromInt(point.x * size.cell.width + size.padding.left)) / scale);
+        const y: f32 = @floatCast(@as(f64, @floatFromInt(point.y * size.cell.height + size.padding.top)) / scale);
+        var origin: @import("graphene").Point = undefined;
+        if (render.computePoint(priv.terminal_page.as(gtk.Widget), &.{ .f_x = x, .f_y = y }, &origin) == 0) return;
+        picker.anchorAt(priv.terminal_page, .{
+            .x = @intFromFloat(@floor(origin.f_x)),
+            .y = @intFromFloat(@floor(origin.f_y)),
+            .width = @intFromFloat(@ceil(@as(f64, @floatFromInt(size.cell.width)) / scale)),
+            .height = @intFromFloat(@ceil(@as(f64, @floatFromInt(size.cell.height)) / scale)),
+        });
+    }
+
+    pub fn showPicker(self: *Self, widget: *gtk.Widget) void {
+        self.private().terminal_page.addOverlay(widget);
+    }
+
+    pub fn hidePicker(self: *Self, widget: *gtk.Widget, restore_focus: bool) void {
+        const root = self.as(gtk.Widget).getRoot();
+        const focus = if (root) |r| r.getFocus() else null;
+        const owned_focus = if (focus) |f| f == widget or f.isAncestor(widget) != 0 else false;
+        self.private().terminal_page.removeOverlay(widget);
+        if (restore_focus and owned_focus) self.grabFocus();
+    }
+
     pub fn defaultTermioEnv(self: *Self) !std.process.Environ.Map {
         const app = Application.default();
         const alloc = app.allocator();
@@ -1604,6 +1650,10 @@ pub const Surface = extern struct {
         } else {
             _ = env.orderedRemove("LANG");
         }
+
+        _ = env.orderedRemove("GHOSTTY_IPC_BUS_NAME");
+        _ = env.orderedRemove("GHOSTTY_IPC_INSTANCE");
+        if (app.picker()) |service| try service.addEnv(&env);
 
         // Don't leak these GTK environment variables to child processes.
         _ = env.orderedRemove("GDK_DEBUG");
@@ -1882,6 +1932,7 @@ pub const Surface = extern struct {
     }
 
     fn dispose(self: *Self) callconv(.c) void {
+        if (Application.default().picker()) |service| service.cancelSurface(self, "pane_closed");
         const priv = self.private();
 
         self.clearDesktopNotifications();

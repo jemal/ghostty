@@ -17,4 +17,6 @@ test {
     _ = @import("gtk/portal.zig");
     _ = @import("gtk/scale.zig");
     _ = @import("gtk/session.zig");
+    _ = @import("gtk/picker/protocol.zig");
+    _ = @import("gtk/picker/placement.zig");
 }

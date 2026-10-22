@@ -21,6 +21,10 @@ in the last active-session index. Closing the last window retains that
 session for the next activation, including when a hidden quick terminal keeps
 the application running. Quick terminals are not persisted.
 
+Choose **Switch Session…** for a searchable session picker. Selecting an open
+session focuses its existing window; selecting a saved session restores it.
+This uses the same pane-local widget as the [native picker API](PICKER_IPC.md).
+
 Choose **Manage Sessions…** in the session menu to open the Sessions window.
 It lists saved sessions with Open, Saved, or Archived status, alongside Open
 (or Focus), Rename, Archive, and Delete actions. **Show archived sessions**
@@ -43,8 +47,11 @@ The app finishes pending saves before modifying storage.
 
 ## Compact tabs
 
-`gtk-tabs-style = compact` adds a shared rounded tab rail, a raised selected
-pill, content-width tabs, and a matching session selector. `native` (the
+`gtk-tabs-style = compact` adds a shared rounded tab rail that grows and shrinks
+with the tabs, a raised selected pill, content-width tabs, and a matching session
+selector. The strip uses tighter tab/button padding. Dividers separate inactive
+neighbors and fade beside selected or hovered tabs, following native tab order
+during dragging and reordering. `native` (the
 default) restores standard desktop styling. The choice can be reloaded live;
 compact mode overrides `gtk-wide-tabs` without changing its configured value.
 
