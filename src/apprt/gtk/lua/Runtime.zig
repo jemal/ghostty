@@ -14,6 +14,7 @@ const Runtime = @This();
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const c = @import("lua").c;
+const configpkg = @import("../../../config.zig");
 const global = @import("../../../global.zig");
 const input = @import("../../../input.zig");
 
@@ -41,7 +42,52 @@ pub const Host = struct {
 
     /// Show a short message in the window of the given surface.
     toast: *const fn (ptr: *anyopaque, surface: u64, text: [:0]const u8) void,
+
+    /// Get information about the surface with the given runtime ID, or null
+    /// if there is no such surface. Strings are allocated with `alloc`.
+    info: *const fn (ptr: *anyopaque, alloc: Allocator, surface: u64) Allocator.Error!?SurfaceInfo,
+
+    /// Open a new split, tab or window. `surface` is the runtime ID of the
+    /// surface to split, of a surface in the window to add a tab to, or of
+    /// the parent of a new window. It is zero when there is no parent.
+    open: *const fn (ptr: *anyopaque, surface: u64, target: OpenTarget, options: OpenOptions) OpenError!void,
 };
+
+pub const SurfaceInfo = struct {
+    title: ?[]const u8 = null,
+
+    /// The directory that the shell reports with OSC 7.
+    pwd: ?[]const u8 = null,
+
+    foreground: ?Foreground = null,
+
+    /// The process group that controls the terminal now.
+    pub const Foreground = struct {
+        pid: u64,
+        cwd: ?[]const u8 = null,
+        name: ?[]const u8 = null,
+    };
+};
+
+pub const OpenTarget = union(enum) {
+    split: Direction,
+    tab,
+    window,
+
+    pub const Direction = enum { left, right, down, up };
+};
+
+pub const OpenOptions = struct {
+    command: ?configpkg.Command = null,
+    cwd: ?[:0]const u8 = null,
+    title: ?[:0]const u8 = null,
+
+    /// Keep the terminal open after the command exits. Null uses the
+    /// `wait-after-command` config value.
+    wait: ?bool = null,
+};
+
+pub const OpenError = Allocator.Error || error{ NoSurface, OpenFailed };
 
 const Action = struct {
     /// The Lua function, as a reference in the Lua registry.
@@ -64,6 +110,11 @@ alloc: Allocator,
 
 /// Owns action names, titles, descriptions and binds.
 arena: std.heap.ArenaAllocator,
+
+/// Temporary memory for one call of a Lua C function. Each function that
+/// uses it resets it first. It needs no `defer`, so a Lua error cannot
+/// leak it.
+scratch: std.heap.ArenaAllocator,
 
 lua: *c.lua_State,
 host: Host,
@@ -92,6 +143,7 @@ pub fn create(alloc: Allocator, host: Host) InitError!*Runtime {
     self.* = .{
         .alloc = alloc,
         .arena = .init(alloc),
+        .scratch = .init(alloc),
         .lua = lua,
         .host = host,
     };
@@ -110,6 +162,7 @@ pub fn destroy(self: *Runtime) void {
     self.actions.deinit(self.alloc);
     self.binds.deinit(self.alloc);
     self.arena.deinit();
+    self.scratch.deinit();
     self.alloc.destroy(self);
 }
 
@@ -258,18 +311,28 @@ pub fn configEntries(self: *const Runtime, alloc: Allocator) Allocator.Error![]c
 fn installApi(self: *Runtime) void {
     const L = self.lua;
 
-    c.lua_createtable(L, 0, 5);
+    c.lua_createtable(L, 0, 9);
     const functions = .{
         .{ "action", luaAction },
         .{ "bind", luaBind },
         .{ "invoke", luaInvoke },
         .{ "toast", luaToast },
         .{ "log", luaLog },
+        .{ "split", luaSplit },
+        .{ "tab", luaTab },
+        .{ "window", luaWindow },
     };
     inline for (functions) |entry| {
         c.lua_pushcclosure(L, entry[1], 0);
         c.lua_setfield(L, -2, entry[0]);
     }
+
+    // ghostty.surface
+    c.lua_createtable(L, 0, 1);
+    c.lua_pushcclosure(L, luaSurfaceInfo, 0);
+    c.lua_setfield(L, -2, "info");
+    c.lua_setfield(L, -2, "surface");
+
     c.lua_setglobal(L, "ghostty");
 
     // These functions block the GTK main thread or stop the app.
@@ -414,6 +477,178 @@ fn luaLog(L: ?*c.lua_State) callconv(.c) c_int {
     return 0;
 }
 
+/// ghostty.surface.info([id]) -> { id, title, pwd, foreground } | nil, err
+fn luaSurfaceInfo(L: ?*c.lua_State) callconv(.c) c_int {
+    const self = fromState(L);
+    const id: u64 = if (c.lua_type(L, 1) <= c.LUA_TNIL)
+        self.surface
+    else
+        @bitCast(c.luaL_checkinteger(L, 1));
+    if (self.depth == 0) return pushError(L, "ghostty.surface.info works only inside an action");
+
+    _ = self.scratch.reset(.retain_capacity);
+    const info = (self.host.info(self.host.ptr, self.scratch.allocator(), id) catch
+        return pushError(L, "out of memory")) orelse
+        return pushError(L, "no surface with that ID");
+
+    c.lua_createtable(L, 0, 4);
+    c.lua_pushinteger(L, @bitCast(id));
+    c.lua_setfield(L, -2, "id");
+    setStringField(L, "title", info.title);
+    setStringField(L, "pwd", info.pwd);
+    if (info.foreground) |fg| {
+        c.lua_createtable(L, 0, 3);
+        c.lua_pushinteger(L, @bitCast(fg.pid));
+        c.lua_setfield(L, -2, "pid");
+        setStringField(L, "cwd", fg.cwd);
+        setStringField(L, "name", fg.name);
+        c.lua_setfield(L, -2, "foreground");
+    }
+    return 1;
+}
+
+/// ghostty.split{ surface?, direction?, command?, cwd?, title? } -> true | nil, err
+fn luaSplit(L: ?*c.lua_State) callconv(.c) c_int {
+    return open(L, .split);
+}
+
+/// ghostty.tab{ surface?, command?, cwd?, title? } -> true | nil, err
+fn luaTab(L: ?*c.lua_State) callconv(.c) c_int {
+    return open(L, .tab);
+}
+
+/// ghostty.window{ surface?, command?, cwd?, title? } -> true | nil, err
+fn luaWindow(L: ?*c.lua_State) callconv(.c) c_int {
+    return open(L, .window);
+}
+
+fn open(L: ?*c.lua_State, comptime kind: std.meta.Tag(OpenTarget)) c_int {
+    const self = fromState(L);
+    if (c.lua_type(L, 1) > c.LUA_TNIL) c.luaL_checktype(L, 1, c.LUA_TTABLE);
+    if (self.depth == 0) return pushError(L, "ghostty." ++ @tagName(kind) ++ " works only inside an action");
+
+    // Without a table, use an empty one, so the fields below are all nil.
+    c.lua_settop(L, 1);
+    if (c.lua_type(L, 1) <= c.LUA_TNIL) {
+        c.lua_settop(L, 0);
+        c.lua_createtable(L, 0, 0);
+    }
+
+    // A window has no surface by default. It does not inherit anything.
+    const surface: u64 = surface: {
+        defer c.lua_settop(L, 1);
+        switch (c.lua_getfield(L, 1, "surface")) {
+            c.LUA_TNIL => break :surface if (kind == .window) 0 else self.surface,
+            c.LUA_TNUMBER => if (c.lua_isinteger(L, -1) != 0)
+                break :surface @bitCast(c.lua_tointegerx(L, -1, null)),
+            else => {},
+        }
+        return pushError(L, "surface must be a surface ID");
+    };
+
+    const target: OpenTarget = switch (kind) {
+        .split => split: {
+            const direction = fieldString(L, 1, "direction") orelse "right";
+            break :split .{ .split = std.meta.stringToEnum(OpenTarget.Direction, direction) orelse
+                return pushError(L, "direction must be left, right, up or down") };
+        },
+        .tab => .tab,
+        .window => .window,
+    };
+
+    _ = self.scratch.reset(.retain_capacity);
+    const options = openOptions(L, self.scratch.allocator()) catch |err| return pushError(L, switch (err) {
+        error.OutOfMemory => "out of memory",
+        error.InvalidCommand => "command must be a string or a non-empty list of strings",
+        error.InvalidCwd => "cwd must be a string",
+        error.InvalidTitle => "title must be a string",
+        error.InvalidWait => "wait must be a boolean",
+    });
+
+    self.host.open(self.host.ptr, surface, target, options) catch |err| return pushError(L, switch (err) {
+        error.OutOfMemory => "out of memory",
+        error.NoSurface => "no surface with that ID",
+        error.OpenFailed => "unable to open the " ++ @tagName(kind),
+    });
+
+    c.lua_pushboolean(L, 1);
+    return 1;
+}
+
+/// Read the `command`, `cwd`, `title` and `wait` fields of the table at
+/// index 1.
+fn openOptions(
+    L: ?*c.lua_State,
+    alloc: Allocator,
+) (Allocator.Error || error{ InvalidCommand, InvalidCwd, InvalidTitle, InvalidWait })!OpenOptions {
+    var options: OpenOptions = .{};
+
+    options.command = command: {
+        defer c.lua_settop(L, 1);
+        switch (c.lua_getfield(L, 1, "command")) {
+            c.LUA_TNIL => break :command null,
+            c.LUA_TSTRING => break :command .{ .shell = try alloc.dupeSentinel(u8, toString(L, -1), 0) },
+            c.LUA_TTABLE => {
+                const len = c.lua_rawlen(L, -1);
+                if (len == 0) return error.InvalidCommand;
+                const argv = try alloc.alloc([:0]const u8, @intCast(len));
+                for (argv, 1..) |*arg, i| {
+                    if (c.lua_rawgeti(L, -1, @intCast(i)) != c.LUA_TSTRING) return error.InvalidCommand;
+                    arg.* = try alloc.dupeSentinel(u8, toString(L, -1), 0);
+                    c.lua_settop(L, -2);
+                }
+                break :command .{ .direct = argv };
+            },
+            else => return error.InvalidCommand,
+        }
+    };
+
+    inline for (.{
+        .{ "cwd", error.InvalidCwd },
+        .{ "title", error.InvalidTitle },
+    }) |entry| {
+        defer c.lua_settop(L, 1);
+        switch (c.lua_getfield(L, 1, entry[0])) {
+            c.LUA_TNIL => {},
+            c.LUA_TSTRING => @field(options, entry[0]) = try alloc.dupeSentinel(u8, toString(L, -1), 0),
+            else => return entry[1],
+        }
+    }
+
+    options.wait = wait: {
+        defer c.lua_settop(L, 1);
+        break :wait switch (c.lua_getfield(L, 1, "wait")) {
+            c.LUA_TNIL => null,
+            c.LUA_TBOOLEAN => c.lua_toboolean(L, -1) != 0,
+            else => return error.InvalidWait,
+        };
+    };
+
+    return options;
+}
+
+/// Push `nil, msg`, the result of a failed call.
+fn pushError(L: ?*c.lua_State, msg: [:0]const u8) c_int {
+    c.lua_pushnil(L);
+    _ = c.lua_pushlstring(L, msg.ptr, msg.len);
+    return 2;
+}
+
+/// Set the field `key` of the table on the top of the stack, if `value` is
+/// not null.
+fn setStringField(L: ?*c.lua_State, key: [:0]const u8, value: ?[]const u8) void {
+    const v = value orelse return;
+    _ = c.lua_pushlstring(L, v.ptr, v.len);
+    c.lua_setfield(L, -2, key.ptr);
+}
+
+/// The string on the top of the stack. The caller checked its type.
+fn toString(L: ?*c.lua_State, idx: c_int) []const u8 {
+    var len: usize = 0;
+    const ptr = c.lua_tolstring(L, idx, &len);
+    return ptr[0..len];
+}
+
 fn luaDisabled(L: ?*c.lua_State) callconv(.c) c_int {
     return c.luaL_error(L, "%s", c.lua_tolstring(L, c.lua_upvalueindex(1), null));
 }
@@ -502,8 +737,49 @@ const TestHost = struct {
     invoked: ?[]const u8 = null,
     toasts: usize = 0,
 
+    /// The last `open` call, with copies of its strings.
+    opened: ?struct {
+        surface: u64,
+        target: OpenTarget,
+        argv: usize,
+        first_arg: [32]u8,
+        cwd: [32]u8,
+        wait: ?bool,
+    } = null,
+
     fn host(self: *TestHost) Host {
-        return .{ .ptr = self, .invoke = invoke, .toast = toast };
+        return .{ .ptr = self, .invoke = invoke, .toast = toast, .info = info, .open = openSurface };
+    }
+
+    fn info(_: *anyopaque, alloc: Allocator, surface: u64) Allocator.Error!?SurfaceInfo {
+        if (surface != 7) return null;
+        return .{
+            .title = try alloc.dupe(u8, "shell"),
+            .pwd = try alloc.dupe(u8, "/home/me"),
+            .foreground = .{ .pid = 42, .cwd = try alloc.dupe(u8, "/home/me/project") },
+        };
+    }
+
+    fn openSurface(ptr: *anyopaque, surface: u64, target: OpenTarget, options: OpenOptions) OpenError!void {
+        const self: *TestHost = @ptrCast(@alignCast(ptr));
+        if (surface != 0 and surface != 7) return error.NoSurface;
+        self.opened = .{
+            .surface = surface,
+            .target = target,
+            .argv = 0,
+            .first_arg = @splat(0),
+            .cwd = @splat(0),
+            .wait = options.wait,
+        };
+        const opened = &self.opened.?;
+        if (options.command) |command| switch (command) {
+            .direct => |argv| {
+                opened.argv = argv.len;
+                @memcpy(opened.first_arg[0..argv[0].len], argv[0]);
+            },
+            .shell => |shell| @memcpy(opened.first_arg[0..shell.len], shell),
+        };
+        if (options.cwd) |cwd| @memcpy(opened.cwd[0..cwd.len], cwd);
     }
 
     fn invoke(ptr: *anyopaque, _: u64, action: input.Binding.Action) bool {
@@ -641,4 +917,79 @@ test "blocking functions are disabled" {
 
     try testing.expectError(error.TestLoadFailed, testLoad(rt, "os.execute('true')"));
     try testing.expectError(error.TestLoadFailed, testLoad(rt, "io.popen('true')"));
+}
+
+test "surface.info returns the host information" {
+    const testing = std.testing;
+    var host: TestHost = .{};
+    const rt = try create(testing.allocator, host.host());
+    defer rt.destroy();
+
+    try testLoad(rt,
+        \\ghostty.action{ name = "info", run = function(ctx)
+        \\  local info = assert(ghostty.surface.info())
+        \\  assert(info.id == 7 and info.title == "shell" and info.pwd == "/home/me")
+        \\  assert(info.foreground.pid == 42 and info.foreground.cwd == "/home/me/project")
+        \\  assert(info.foreground.name == nil)
+        \\  local none, err = ghostty.surface.info(8)
+        \\  assert(none == nil and err)
+        \\end }
+    );
+    try testing.expect(rt.run("info", 7));
+    try testing.expectEqual(@as(usize, 0), host.toasts);
+}
+
+test "split, tab and window pass their options to the host" {
+    const testing = std.testing;
+    var host: TestHost = .{};
+    const rt = try create(testing.allocator, host.host());
+    defer rt.destroy();
+
+    try testLoad(rt,
+        \\ghostty.action{ name = "split", run = function()
+        \\  assert(ghostty.split{ direction = "down", command = { "cargo", "run" }, cwd = "/src", wait = true })
+        \\end }
+        \\ghostty.action{ name = "tab", run = function()
+        \\  assert(ghostty.tab{ command = "htop" })
+        \\end }
+        \\ghostty.action{ name = "window", run = function()
+        \\  assert(ghostty.window())
+        \\end }
+        \\ghostty.action{ name = "bad", run = function()
+        \\  assert(ghostty.split{ direction = "sideways" } == nil)
+        \\  assert(ghostty.split{ command = {} } == nil)
+        \\  assert(ghostty.split{ command = { 1 } } == nil)
+        \\  assert(ghostty.split{ surface = 8 } == nil)
+        \\  assert(ghostty.tab{ cwd = 3 } == nil)
+        \\  assert(ghostty.tab{ wait = "yes" } == nil)
+        \\end }
+    );
+
+    try testing.expect(rt.run("split", 7));
+    {
+        const opened = host.opened.?;
+        try testing.expectEqual(@as(u64, 7), opened.surface);
+        try testing.expectEqual(OpenTarget{ .split = .down }, opened.target);
+        try testing.expectEqual(@as(usize, 2), opened.argv);
+        try testing.expectEqualStrings("cargo", std.mem.sliceTo(&opened.first_arg, 0));
+        try testing.expectEqualStrings("/src", std.mem.sliceTo(&opened.cwd, 0));
+        try testing.expectEqual(@as(?bool, true), opened.wait);
+    }
+
+    try testing.expect(rt.run("tab", 7));
+    {
+        const opened = host.opened.?;
+        try testing.expectEqual(OpenTarget.tab, opened.target);
+        try testing.expectEqualStrings("htop", std.mem.sliceTo(&opened.first_arg, 0));
+    }
+
+    try testing.expect(rt.run("window", 7));
+    {
+        const opened = host.opened.?;
+        try testing.expectEqual(OpenTarget.window, opened.target);
+        try testing.expectEqual(@as(u64, 0), opened.surface);
+    }
+
+    try testing.expect(rt.run("bad", 7));
+    try testing.expectEqual(@as(usize, 0), host.toasts);
 }

@@ -747,6 +747,7 @@ pub const Surface = extern struct {
             command: ?configpkg.Command = null,
             shell_integration: ?configpkg.Config.ShellIntegration = null,
             working_directory: ?[:0]const u8 = null,
+            wait_after_command: ?bool = null,
 
             pub const none: @This() = .{};
         } = .none,
@@ -764,6 +765,7 @@ pub const Surface = extern struct {
             .command = if (overrides.command) |c| c.clone(alloc) catch null else null,
             .shell_integration = overrides.shell_integration,
             .working_directory = if (overrides.working_directory) |wd| alloc.dupeSentinel(u8, wd, 0) catch null else null,
+            .wait_after_command = overrides.wait_after_command,
         };
         return self;
     }
@@ -3694,6 +3696,7 @@ pub const Surface = extern struct {
             return error.SurfaceError;
         };
         errdefer surface.deinit();
+        surface.wait_after_command_override = priv.overrides.wait_after_command;
 
         // Store it!
         priv.core_surface = surface;

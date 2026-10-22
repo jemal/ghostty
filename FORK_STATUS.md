@@ -282,8 +282,13 @@ updated; `nix/zigCacheHash.nix` was not.
 Tests for the runtime and the config entries passed. The ReleaseFast build
 passed and is installed in `~/.local`. The user's desktop test passed on
 2026-10-22.
-Phases 2 to 4 (panes and splits, waiting with coroutines, events) are not
-started. See `src/apprt/gtk/LUA_PLAN.md`.
+Phase 2 adds `ghostty.surface.info` (title, OSC 7 directory, foreground
+process ID, directory and name) and `ghostty.split`, `ghostty.tab` and
+`ghostty.window` with `command`, `cwd`, `title` and `wait`. Its tests and the
+ReleaseFast build passed and it is installed. The user's desktop test
+passed on 2026-10-22, with the Cargo split script.
+Phases 3 and 4 (waiting with coroutines, events) are not started. See
+`src/apprt/gtk/LUA_PLAN.md`.
 
 ### Native picker and IPC
 
@@ -427,6 +432,7 @@ Nothing was pushed during this work.
 | `ukknpltx` | docs: use system fontconfig for local Linux builds |
 | `xvyxyotw` | Unified searchable session overlay, keyboard actions, and handoff docs. |
 | `zpwtzozm` | gtk: add Lua scripting for actions and keybinds (phase 1) |
+| `onykxtxm` | gtk: let Lua inspect panes and open splits, tabs and windows (phase 2) |
 
 ## Related implementation documentation
 

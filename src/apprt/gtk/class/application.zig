@@ -874,6 +874,11 @@ pub const Application = extern struct {
         return runtime.run(name, surface_id);
     }
 
+    /// Open a new window. Lua's `ghostty.window` uses this.
+    pub fn newWindow(self: *Self, parent: ?*CoreSurface, overrides: Overrides) !void {
+        try Action.newWindow(self, parent, overrides);
+    }
+
     /// Returns the apprt application associated with this application.
     pub fn rt(self: *Self) *ApprtApp {
         return self.private().rt_app;
@@ -2091,6 +2096,7 @@ pub const Application = extern struct {
                     .shell_integration = overrides.shell_integration,
                     .working_directory = overrides.working_directory,
                     .title = overrides.title,
+                    .wait_after_command = overrides.wait_after_command,
                 },
             )) {
                 log.warn("new-tab: unable to create tab", .{});
@@ -2104,6 +2110,7 @@ pub const Application = extern struct {
                     .shell_integration = overrides.shell_integration,
                     .working_directory = overrides.working_directory,
                     .title = overrides.title,
+                    .wait_after_command = overrides.wait_after_command,
                 },
             ) catch |err| {
                 log.warn("new-tab: unable to create new window: {t}", .{err});
@@ -2732,6 +2739,7 @@ const Action = struct {
                     .shell_integration = overrides.shell_integration,
                     .working_directory = overrides.working_directory,
                     .title = overrides.title,
+                    .wait_after_command = overrides.wait_after_command,
                 });
                 return true;
             },
@@ -2758,6 +2766,7 @@ const Action = struct {
                 .shell_integration = overrides.shell_integration,
                 .working_directory = overrides.working_directory,
                 .title = overrides.title,
+                .wait_after_command = overrides.wait_after_command,
             },
         );
     }
@@ -2785,6 +2794,7 @@ const Action = struct {
             .shell_integration = overrides.shell_integration,
             .working_directory = overrides.working_directory,
             .title = overrides.title,
+            .wait_after_command = overrides.wait_after_command,
         });
 
         // Estimate the initial window size before presenting so the window

@@ -146,6 +146,11 @@ size: rendererpkg.Size,
 /// the lifetime of. This makes updating config at runtime easier.
 config: DerivedConfig,
 
+/// Replaces `config.wait_after_command` for this surface when it is set.
+/// The apprt sets it after `init`. It is separate from `config`, so a
+/// config reload does not reset it.
+wait_after_command_override: ?bool = null,
+
 /// The conditional state of the configuration. This can affect
 /// how certain configurations take effect such as light/dark mode.
 /// This is managed completely by Ghostty core but an apprt action
@@ -1368,7 +1373,7 @@ fn childExited(self: *Surface, info: apprt.surface.Message.ChildExited) void {
 
     // Waiting after command we stop here. The terminal is updated, our
     // state is updated, and now its up to the user to decide what to do.
-    if (self.config.wait_after_command) return;
+    if (self.wait_after_command_override orelse self.config.wait_after_command) return;
 
     // If we aren't waiting after the command, then we exit immediately
     // with no confirmation.

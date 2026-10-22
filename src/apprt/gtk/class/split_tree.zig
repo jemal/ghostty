@@ -223,6 +223,7 @@ pub const SplitTree = extern struct {
             .shell_integration = overrides.shell_integration,
             .working_directory = overrides.working_directory,
             .title = overrides.title,
+            .wait_after_command = overrides.wait_after_command,
         });
         defer surface.unref();
         _ = surface.refSink();
@@ -254,9 +255,18 @@ pub const SplitTree = extern struct {
             return;
         };
 
-        // The handle we create the split relative to. Today this is the active
-        // surface but this might be the handle of the given parent if we want.
-        const handle = self.getActiveSurfaceHandle() orelse .root;
+        // The handle we create the split relative to. This is the parent if
+        // it is in this tree (Lua can split any surface), and otherwise the
+        // active surface.
+        const handle = handle: {
+            if (parent_) |p| {
+                var it = old_tree.iterator();
+                while (it.next()) |entry| {
+                    if (entry.view == p) break :handle entry.handle;
+                }
+            }
+            break :handle self.getActiveSurfaceHandle() orelse .root;
+        };
 
         // Create our split!
         var new_tree = try old_tree.split(

@@ -1,7 +1,39 @@
 # Lua scripting plan (GTK)
 
 Status: phase 1 is implemented and passed the user's desktop test
-(2026-10-22). Phases 2 to 4 are not started.
+(2026-10-22). Phase 2 is implemented and passed the user's desktop test.
+Phases 3 and 4 are not started.
+
+## Phase 2: what exists now
+
+- `ghostty.surface.info([id])` returns `{ id, title, pwd, foreground }`.
+  `foreground` is `{ pid, cwd, name }`. `cwd` and `name` come from
+  `/proc/<pid>/cwd` and `/proc/<pid>/comm` (Linux only). `id` defaults to
+  `ctx.surface`.
+- `ghostty.split{ surface?, direction?, command?, cwd?, title?, wait? }` splits
+  beside `surface` (default `ctx.surface`). `direction` defaults to
+  `right`. The new split always gets the focus.
+- `ghostty.tab{ surface?, command?, cwd?, title? }` adds a tab to the window
+  of `surface`.
+- `ghostty.window{ surface?, command?, cwd?, title? }` opens a window.
+  Without `surface`, it inherits nothing.
+- `command` is a list (run directly) or a string (run through the shell).
+- `wait = true` keeps the pane open after the command exits, until a key
+  is pressed. `wait = false` closes it. Without `wait`, the
+  `wait-after-command` config value applies. The value is stored on the
+  core surface (`wait_after_command_override`), so a config reload does
+  not reset it.
+- A list command runs with Ghostty's own environment. Tools that come only
+  from a project dev shell, such as `cargo`, need a wrapper, for example
+  `{ "direnv", "exec", root, "cargo", "run" }`.
+- The functions return `true`, or `nil, err`. They do not return the ID of
+  the new surface, because GTK creates the terminal later, when the widget
+  is shown. Phase 3 can wait for it.
+- `split_tree.newSplit` now splits beside the given parent when it is in
+  the tree. Before, it always split beside the active surface. Existing
+  callers pass the active surface, so they do not change.
+
+The Cargo example below works with phase 2. Its `focus` field is ignored.
 
 ## Phase 1: what exists now
 
@@ -147,10 +179,10 @@ bound function shows as a toast and goes to the log.
 | Function | Result |
 |---|---|
 | `ghostty.invoke(action)` | Runs any built-in binding action, for example `"new_split:right"` or `"goto_tab:3"`. It uses the INI action parser, so all actions work. `"lua:<name>"` runs a Lua action. |
-| `ghostty.surface.info(id)` | `{ id, title, pwd, foreground = { pid, cwd, name } }`. `foreground` is nil when it is unknown. |
-| `ghostty.split{ surface, direction, focus?, command?, cwd?, title? }` | New split beside `surface`. `direction` is `left`, `right`, `up` or `down`. `command` is a list (run directly) or a string (run through the shell). Returns the new surface ID. |
-| `ghostty.tab{ surface?, command?, cwd?, title? }` | New tab in the window of `surface`. |
-| `ghostty.window{ command?, cwd?, title? }` | New window. |
+| `ghostty.surface.info(id?)` | `{ id, title, pwd, foreground = { pid, cwd, name } }`. `foreground` is nil when it is unknown. |
+| `ghostty.split{ surface?, direction?, command?, cwd?, title?, wait? }` | New split beside `surface`. `direction` is `left`, `right`, `up` or `down`. `command` is a list (run directly) or a string (run through the shell). `wait = true` keeps the pane open after the command exits. Returns `true`. |
+| `ghostty.tab{ surface?, command?, cwd?, title?, wait? }` | New tab in the window of `surface`. Returns `true`. |
+| `ghostty.window{ surface?, command?, cwd?, title?, wait? }` | New window. `surface` is the parent to inherit from. Returns `true`. |
 | `ghostty.toast(text)` | Shows a toast in the window of the current surface. |
 | `ghostty.log(text)` | Writes to the Ghostty log. |
 

@@ -16,6 +16,10 @@ shell_integration: ?configpkg.Config.ShellIntegration,
 working_directory: ?[:0]const u8,
 title: ?[:0]const u8,
 
+/// Keep the terminal open after its command exits, in place of the
+/// `wait-after-command` config value. Lua scripts set this.
+wait_after_command: ?bool = null,
+
 pub const none: Overrides = .{
     .command = null,
     .shell_integration = null,
