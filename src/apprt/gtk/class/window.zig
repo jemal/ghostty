@@ -750,6 +750,12 @@ pub const Window = extern struct {
         // Remainder uses the config
         const config = if (priv.config) |v| v.get() else return;
 
+        if (config.@"gtk-tabs-style" == .compact) {
+            priv.tab_bar.as(gtk.Widget).addCssClass("compact-tabs");
+        } else {
+            priv.tab_bar.as(gtk.Widget).removeCssClass("compact-tabs");
+        }
+
         // Only add a solid background if we're opaque.
         self.toggleCssClass(
             "background",
@@ -1405,7 +1411,7 @@ pub const Window = extern struct {
     fn getTabsWide(self: *Self) bool {
         const priv = self.private();
         const config = if (priv.config) |v| v.get() else return true;
-        return config.@"gtk-wide-tabs";
+        return config.@"gtk-tabs-style" != .compact and config.@"gtk-wide-tabs";
     }
 
     fn getToolbarStyle(self: *Self) adw.ToolbarStyle {

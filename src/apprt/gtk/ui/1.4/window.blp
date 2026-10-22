@@ -98,7 +98,7 @@ template $GhosttyWindow: Adw.ApplicationWindow {
           orientation: horizontal;
 
           Gtk.MenuButton session_button {
-            styles ["flat"]
+            styles ["flat", "session-selector"]
             visible: bind template.session-enabled;
             notify::active => $session_menu_opened();
             menu-model: session_menu;

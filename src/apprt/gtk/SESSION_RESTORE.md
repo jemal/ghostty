@@ -21,6 +21,20 @@ in the last active-session index. Closing the last window retains that
 session for the next activation, including when a hidden quick terminal keeps
 the application running. Quick terminals are not persisted.
 
+## Compact tabs
+
+`gtk-tabs-style = compact` adds a shared rounded tab rail, a raised selected
+pill, content-width tabs, and a matching session selector. `native` (the
+default) restores standard desktop styling. The choice can be reloaded live;
+compact mode overrides `gtk-wide-tabs` without changing its configured value.
+
+The style works with top or bottom tabs, inverted close buttons, and either
+GTK titlebar style. Native tab selection, close buttons, dragging, overflow,
+and overview remain available. For a single row of tabs and window controls,
+combine it with `gtk-titlebar-style = tabs`. Chrome colors continue to follow
+`window-theme`. Visibility remains controlled by the existing titlebar and
+tab-bar options.
+
 ## Storage
 
 `$XDG_STATE_HOME/ghostty/sessions/<application-id>/` contains one `<id>.json`

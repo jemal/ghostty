@@ -12,6 +12,83 @@ window.ssd.no-border-radius {
   border-radius: 0 0;
 }
 
+/* Compact tabs keep AdwTabBar's native interactions, overflow, and focus
+ * rings. Scope these rules to the opted-in bar so overview thumbnails and
+ * other application windows retain their desktop styling.
+ */
+.window tabbar.compact-tabs .box > scrolledwindow {
+  margin-top: 4px;
+  margin-bottom: 4px;
+  border-radius: 28px;
+  background: color-mix(in srgb, currentColor 5%, transparent);
+}
+
+.window tabbar.compact-tabs tabbox {
+  min-height: 32px;
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+
+.window tabbar.compact-tabs tabbox > tabboxchild {
+  border-radius: 28px;
+}
+
+.window tabbar.compact-tabs tabbox > separator:not(.hidden) {
+  margin-top: 8px;
+  margin-bottom: 8px;
+  opacity: 0.25;
+}
+
+.window tabbar.compact-tabs tab {
+  min-height: 28px;
+  padding: 2px 10px;
+  border-radius: 28px;
+  background: transparent;
+}
+
+.window tabbar.compact-tabs tab:hover {
+  background: color-mix(in srgb, currentColor 7%, transparent);
+}
+
+.window tabbar.compact-tabs tab:selected {
+  background: var(--active-toggle-bg-color);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, currentColor 8%, transparent),
+    0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+.window tabbar.compact-tabs tab:selected:hover {
+  background: color-mix(
+    in srgb,
+    var(--active-toggle-bg-color) 96%,
+    currentColor
+  );
+}
+
+.window tabbar.compact-tabs tab:active {
+  background: color-mix(in srgb, currentColor 20%, transparent);
+}
+
+.window tabbar.compact-tabs .session-selector > button {
+  min-height: 28px;
+  padding: 2px 10px;
+  border-radius: 28px;
+  font-weight: 600;
+  background: color-mix(in srgb, currentColor 5%, transparent);
+}
+
+.window tabbar.compact-tabs .session-selector > button:hover,
+.window tabbar.compact-tabs .session-selector > button:checked {
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+
+@media (prefers-contrast: more) {
+  .window tabbar.compact-tabs tab:selected,
+  .window tabbar.compact-tabs .session-selector > button {
+    box-shadow: inset 0 0 0 1px currentColor;
+  }
+}
+
 /*
  * GhosttySurface URL overlay
  */
