@@ -2165,6 +2165,9 @@ keybind: Keybinds = .{},
 /// Note: any font available on the system may be used, this font is not
 /// required to be a fixed-width font.
 ///
+/// On GTK, this applies to the headerbar, tab titles, and session selector.
+/// The font size follows the desktop settings, independently of `font-size`.
+///
 /// Available since: 1.0.0 on macOS, 1.1.0 on GTK
 @"window-title-font-family": ?[:0]const u8 = null,
 

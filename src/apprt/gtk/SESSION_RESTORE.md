@@ -36,8 +36,15 @@ on the right and moves overview and split actions into the main menu, giving
 tabs more room. Long session names are shortened in the strip and remain fully
 visible in their tooltip. Tab tooltips show the full title and working
 directory, including when the title fades to fit the available width.
-Chrome colors continue to follow `window-theme`. Visibility remains controlled by the existing titlebar and
-tab-bar options.
+
+Compact tabs use regular inactive titles and medium-weight selected titles
+and session names. The interface font and size follow the desktop by default;
+`window-title-font-family` overrides the font family for both the headerbar and
+tab bar, independently of the terminal font. Native libadwaita title alignment
+and fading remain in use.
+
+Chrome colors continue to follow `window-theme`. Visibility remains controlled
+by the existing titlebar and tab-bar options.
 
 ## Storage
 

@@ -47,7 +47,12 @@ window.ssd.no-border-radius {
 }
 
 .window tabbar.compact-tabs tab .tab-title {
+  font-weight: 400;
   opacity: 0.78;
+}
+
+.window tabbar.compact-tabs tab:selected .tab-title {
+  font-weight: 500;
 }
 
 .window tabbar.compact-tabs tab:selected .tab-title,
@@ -83,7 +88,7 @@ window.ssd.no-border-radius {
   min-height: 28px;
   padding: 2px 8px;
   border-radius: 28px;
-  font-weight: 600;
+  font-weight: 500;
   background: transparent;
 }
 

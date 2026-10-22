@@ -1070,7 +1070,7 @@ pub const Application = extern struct {
 
         if (config.@"window-title-font-family") |font_family| {
             try writer.print(
-                \\.window headerbar {{
+                \\.window headerbar, .window tabbar {{
                 \\  font-family: "{[font_family]s}";
                 \\}}
                 \\
