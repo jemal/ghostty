@@ -296,6 +296,10 @@ pub const Tab = extern struct {
         return priv.split_tree;
     }
 
+    pub fn getTitleOverride(self: *Self) ?[:0]const u8 {
+        return self.private().title_override;
+    }
+
     /// Returns true if this tab needs confirmation before quitting based
     /// on the various Ghostty configurations.
     pub fn getNeedsConfirmQuit(self: *Self) bool {

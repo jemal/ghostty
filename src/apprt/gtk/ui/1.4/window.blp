@@ -96,13 +96,33 @@ template $GhosttyWindow: Adw.ApplicationWindow {
         [start]
         Gtk.Box {
           orientation: horizontal;
-          visible: bind $titlebar_style_is_tabs(template.titlebar-style) as <bool>;
+
+          Gtk.MenuButton session_button {
+            styles ["flat"]
+            visible: bind template.session-enabled;
+            notify::active => $session_menu_opened();
+            menu-model: session_menu;
+            tooltip-text: bind template.session-name;
+            can-focus: false;
+
+            child: Gtk.Box {
+              spacing: 6;
+              Gtk.Label {
+                label: bind template.session-name;
+                ellipsize: end;
+                max-width-chars: 20;
+              }
+              Gtk.Image { icon-name: "pan-down-symbolic"; }
+            };
+          }
 
           Gtk.WindowControls {
             side: start;
+            visible: bind $titlebar_style_is_tabs(template.titlebar-style) as <bool>;
           }
 
           Adw.SplitButton {
+            visible: bind $titlebar_style_is_tabs(template.titlebar-style) as <bool>;
             styles [
               "flat",
             ]
@@ -196,6 +216,17 @@ menu split_menu {
   item {
     label: _("Split Right");
     action: "win.split-right";
+  }
+}
+
+menu session_menu {
+  item {
+    label: _("New Session");
+    action: "win.new-session";
+  }
+  item {
+    label: _("Rename Session…");
+    action: "win.rename-session";
   }
 }
 

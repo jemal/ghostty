@@ -2285,7 +2285,7 @@ keybind: Keybinds = .{},
 /// If you change this value to `never` while Ghostty is not running, the next
 /// Ghostty launch will NOT restore the window state.
 ///
-/// If you change this value to `default` while Ghostty is not running and the
+/// On macOS, if you change this value to `default` while Ghostty is not running and the
 /// previous exit saved state, the next Ghostty launch will still restore the
 /// window state. This is because Ghostty cannot know if the previous exit was
 /// due to a forced save or not (macOS doesn't provide this information).
@@ -2296,7 +2296,17 @@ keybind: Keybinds = .{},
 ///
 /// The default value is `default`.
 ///
-/// This is currently only supported on macOS. This has no effect on Linux.
+/// On GTK, `always` enables named sessions. Each session contains one window's
+/// tabs, split layout, working directories, custom titles, and focus. Sessions
+/// are saved under `$XDG_STATE_HOME/ghostty/sessions/`, separated by application
+/// ID. A session menu beside the tabs supports creating, renaming, and reopening
+/// sessions. Reopening an already open session focuses its window.
+///
+/// GTK restores the sessions open at the last save. Closing a session window
+/// retains its saved layout so it can be reopened from the session menu.
+/// Shells start afresh; running commands and terminal contents are not restored.
+/// On GTK, `default` and `never` disable both saving and restoration. Previously
+/// saved sessions are retained while disabled.
 @"window-save-state": WindowSaveState = .default,
 
 /// Resize the window in discrete increments of the focused surface's cell size.

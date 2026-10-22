@@ -47,6 +47,7 @@ const GlobalShortcuts = @import("global_shortcuts.zig").GlobalShortcuts;
 const OpenURI = @import("../portal.zig").OpenURI;
 const media = @import("../media.zig");
 const Overrides = @import("Overrides.zig");
+const sessions = @import("../session.zig");
 
 const log = std.log.scoped(.gtk_ghostty_application);
 
@@ -235,6 +236,9 @@ pub const Application = extern struct {
         // on the first audio bell and rebuilt when `bell-audio-path` changes;
         // unref'd on dispose. See ringBell and media.zig.
         bell_media: ?*gtk.MediaFile = null,
+
+        session_timer: ?c_uint = null,
+        session_index_hash: ?u64 = null,
 
         pub var offset: c_int = 0;
     };
@@ -658,6 +662,7 @@ pub const Application = extern struct {
     }
 
     fn quitNow(self: *Self) void {
+        self.saveSessions();
         // Get all our windows and destroy them, forcing them to free.
         const list = gtk.Window.listToplevels();
         defer list.free();
@@ -1332,6 +1337,10 @@ pub const Application = extern struct {
         // Set ourselves as the default application.
         gio.Application.setDefault(self.as(gio.Application));
 
+        // Capture layout changes and cwd/focus changes without connecting a
+        // web of per-pane signals. Hashes suppress writes for unchanged state.
+        self.private().session_timer = glib.timeoutAdd(2000, saveSessionsTimeout, self);
+
         // The D-Bus connection is only valid after GApplication startup.
         self.openUri().setDbusConnection(
             self.as(gio.Application).getDbusConnection(),
@@ -1507,6 +1516,10 @@ pub const Application = extern struct {
     fn activate(self: *Self) callconv(.c) void {
         log.debug("activate", .{});
 
+        // A hidden quick terminal can keep the process alive. Restore again
+        // on reactivation when there are no regular windows left.
+        if (self.restoreSessions()) return;
+
         // Queue a new window
         const priv = self.private();
         _ = priv.core_app.mailbox.push(global.io(), .{
@@ -1520,8 +1533,113 @@ pub const Application = extern struct {
         );
     }
 
+    pub fn sessionsEnabled(self: *Self) bool {
+        return self.private().config.get().@"window-save-state" == .always;
+    }
+
+    pub fn sessionDir(self: *Self) !std.Io.Dir {
+        var env = try global.environMap();
+        defer env.deinit();
+        const base = try internal_os.xdg.state(global.io(), self.allocator(), &env, .{ .subdir = "ghostty/sessions" });
+        defer self.allocator().free(base);
+        return sessions.open(global.io(), self.allocator(), base, std.mem.span(self.as(gio.Application).getApplicationId() orelse build_config.bundle_id));
+    }
+
+    fn saveSessionsTimeout(data: ?*anyopaque) callconv(.c) c_int {
+        const self: *Self = @ptrCast(@alignCast(data.?));
+        self.saveSessions();
+        return @intFromBool(glib.SOURCE_CONTINUE);
+    }
+
+    pub fn saveSessions(self: *Self) void {
+        if (!self.sessionsEnabled()) return;
+        self.saveSessionsFallible() catch |err| {
+            log.warn("unable to save sessions err={}", .{err});
+        };
+    }
+
+    const SessionIndex = struct { version: u32 = sessions.version, sessions: []const u64 };
+
+    fn saveSessionsFallible(self: *Self) !void {
+        const dir = try self.sessionDir();
+        defer dir.close(global.io());
+        var ids: std.ArrayList(u64) = .empty;
+        defer ids.deinit(self.allocator());
+        var current: ?*glib.List = self.as(gtk.Application).getWindows();
+        while (current) |link| : (current = link.f_next) {
+            const ptr: *gtk.Window = @ptrCast(@alignCast(link.f_data orelse continue));
+            const window = gobject.ext.cast(Window, ptr) orelse continue;
+            if (try window.saveSession(dir)) try ids.append(self.allocator(), window.sessionId());
+        }
+        // Keep the last session available after the last window closes.
+        // A hidden quick terminal must never overwrite the saved workspace.
+        if (ids.items.len == 0) return;
+        std.mem.sort(u64, ids.items, {}, std.sort.asc(u64));
+        const bytes = try sessions.serialize(self.allocator(), SessionIndex{ .sessions = ids.items });
+        defer self.allocator().free(bytes);
+        const hash = std.hash.Wyhash.hash(0, bytes);
+        if (self.private().session_index_hash == hash) return;
+        try sessions.write(dir, global.io(), "active.json", bytes);
+        self.private().session_index_hash = hash;
+    }
+
+    pub fn openSession(self: *Self, id: u64) !void {
+        if (!self.sessionsEnabled()) return;
+        var current: ?*glib.List = self.as(gtk.Application).getWindows();
+        while (current) |link| : (current = link.f_next) {
+            const ptr: *gtk.Window = @ptrCast(@alignCast(link.f_data orelse continue));
+            const window = gobject.ext.cast(Window, ptr) orelse continue;
+            if (!window.isQuickTerminal() and window.sessionId() == id) {
+                window.as(gtk.Window).present();
+                return;
+            }
+        }
+        const dir = try self.sessionDir();
+        defer dir.close(global.io());
+        const manifest = try sessions.load(dir, global.io(), self.allocator(), id);
+        defer manifest.deinit();
+        const window = try Window.restoreSession(manifest.value);
+        self.presentSessionWindow(window);
+    }
+
+    pub fn presentSessionWindow(self: *Self, window: *Window) void {
+        self.private().requested_window = true;
+        _ = self.as(gobject.Object).bindProperty("config", window.as(gobject.Object), "config", .{});
+        window.as(gtk.Window).present();
+    }
+
+    fn restoreSessions(self: *Self) bool {
+        if (!self.sessionsEnabled()) return false;
+        var current: ?*glib.List = self.as(gtk.Application).getWindows();
+        while (current) |link| : (current = link.f_next) {
+            const ptr: *gtk.Window = @ptrCast(@alignCast(link.f_data orelse continue));
+            const window = gobject.ext.cast(Window, ptr) orelse continue;
+            if (!window.isQuickTerminal()) return false;
+        }
+        const dir = self.sessionDir() catch return false;
+        defer dir.close(global.io());
+        const bytes = dir.readFileAlloc(global.io(), "active.json", self.allocator(), .limited(65536)) catch return false;
+        defer self.allocator().free(bytes);
+        const index = std.json.parseFromSlice(SessionIndex, self.allocator(), bytes, .{ .ignore_unknown_fields = true }) catch return false;
+        defer index.deinit();
+        if (index.value.version != sessions.version or index.value.sessions.len > sessions.max_sessions) return false;
+        var restored: usize = 0;
+        for (index.value.sessions) |id| {
+            self.openSession(id) catch |err| {
+                log.warn("unable to restore session {x} err={}", .{ id, err });
+                continue;
+            };
+            restored += 1;
+        }
+        return restored != 0;
+    }
+
     fn dispose(self: *Self) callconv(.c) void {
         const priv = self.private();
+        if (priv.session_timer) |source| {
+            _ = glib.Source.remove(source);
+            priv.session_timer = null;
+        }
         if (priv.config_errors_dialog.get()) |diag| {
             diag.close();
             diag.unref(); // strong ref from get()

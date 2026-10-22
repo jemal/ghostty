@@ -575,6 +575,7 @@ pub const Surface = extern struct {
     };
 
     const Private = struct {
+        session_id: u64 = 0,
         /// The configuration that this surface is using.
         config: ?*Config = null,
 
@@ -2119,6 +2120,31 @@ pub const Surface = extern struct {
     /// Returns the pwd property without a copy.
     pub fn getPwd(self: *Self) ?[:0]const u8 {
         return self.private().pwd;
+    }
+
+    /// An unmapped tab may not have initialized its terminal or reported a
+    /// directory yet. Retain its saved cwd across another save/restore cycle.
+    pub fn getSessionWorkingDirectory(self: *Self) ?[:0]const u8 {
+        return self.private().pwd orelse self.private().overrides.working_directory;
+    }
+
+    /// Stable identity for on-disk session state, independent of runtime IPC IDs.
+    pub fn sessionId(self: *Self) u64 {
+        const priv = self.private();
+        if (priv.session_id == 0)
+            priv.session_id = @import("../session.zig").newId(@import("../../../global.zig").io());
+        return priv.session_id;
+    }
+
+    /// Restored panes start unfocused until GTK delivers a real focus event.
+    /// Otherwise an unmapped tab's first pane masks the saved active pane.
+    pub fn restoreSessionId(self: *Self, id: u64) void {
+        self.private().session_id = id;
+        self.private().focused = false;
+    }
+
+    pub fn getTitleOverride(self: *Self) ?[:0]const u8 {
+        return self.private().title_override;
     }
 
     /// Set the pwd for this surface, copies the value.

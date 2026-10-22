@@ -30,6 +30,8 @@ const CommandPalette = @import("command_palette.zig").CommandPalette;
 const WeakRef = @import("../weak_ref.zig").WeakRef;
 const TitleDialog = @import("title_dialog.zig").TitleDialog;
 const Overrides = @import("Overrides.zig");
+const sessions = @import("../session.zig");
+const global = @import("../../../global.zig");
 
 const log = std.log.scoped(.gtk_ghostty_window);
 
@@ -46,6 +48,20 @@ pub const Window = extern struct {
     });
 
     pub const properties = struct {
+        pub const @"session-enabled" = struct {
+            pub const name = "session-enabled";
+            const impl = gobject.ext.defineProperty(name, Self, bool, .{
+                .default = false,
+                .accessor = gobject.ext.typedAccessor(Self, bool, .{ .getter = getSessionEnabled }),
+            });
+        };
+        pub const @"session-name" = struct {
+            pub const name = "session-name";
+            const impl = gobject.ext.defineProperty(name, Self, ?[:0]const u8, .{
+                .default = null,
+                .accessor = C.privateStringFieldAccessor("session_name"),
+            });
+        };
         /// The active surface is the focus that should be receiving all
         /// surface-targeted actions. This is usually the focused surface,
         /// but may also not be focused if the user has selected a non-surface
@@ -294,12 +310,18 @@ pub const Window = extern struct {
         /// The manually overridden title.
         title_override: ?[:0]const u8 = null,
 
+        session_id: u64 = 0,
+        session_name: ?[:0]const u8 = null,
+        session_hash: ?u64 = null,
+        session_menu: ?*gio.Menu = null,
+
         // Template bindings
         tab_overview: *adw.TabOverview,
         tab_bar: *adw.TabBar,
         tab_view: *adw.TabView,
         toolbar: *adw.ToolbarView,
         toast_overlay: *adw.ToastOverlay,
+        session_button: *gtk.MenuButton,
 
         pub var offset: c_int = 0;
     };
@@ -381,6 +403,15 @@ pub const Window = extern struct {
         // in initTemplate.
         self.syncAppearance();
 
+        priv.session_id = sessions.newId(global.io());
+        var name_buf: [64]u8 = undefined;
+        self.setSessionName(std.mem.print(&name_buf, "Session {x}", .{priv.session_id & 0xffffff}) catch unreachable);
+        const menu = gio.Menu.new();
+        priv.session_menu = menu;
+        menu.append(i18n._("New Session"), "win.new-session");
+        menu.append(i18n._("Rename Session…"), "win.rename-session");
+        priv.session_button.setMenuModel(menu.as(gio.MenuModel));
+
         // We need to do this so that the title initializes properly,
         // I think because its a dynamic getter.
         self.as(gobject.Object).notifyByPspec(properties.@"active-surface".impl.param_spec);
@@ -388,10 +419,15 @@ pub const Window = extern struct {
 
     /// Setup our action map.
     fn initActionMap(self: *Self) void {
+        const t_variant_type = glib.ext.VariantType.newFor(u64);
+        defer t_variant_type.free();
         const s_variant_type = glib.ext.VariantType.newFor([:0]const u8);
         defer s_variant_type.free();
 
         const actions = [_]ext.actions.Action(Self){
+            .init("new-session", actionNewSession, null),
+            .init("rename-session", actionRenameSession, null),
+            .init("open-session", actionOpenSession, t_variant_type),
             .init("about", actionAbout, null),
             .init("close", actionClose, null),
             .init("close-tab", actionCloseTab, s_variant_type),
@@ -699,6 +735,7 @@ pub const Window = extern struct {
         inline for (&.{
             "headerbar-visible",
             "tabs-autohide",
+            "session-enabled",
             "tabs-inverted",
             "tabs-visible",
             "tabs-wide",
@@ -939,6 +976,225 @@ pub const Window = extern struct {
         return self.private().tab_view;
     }
 
+    pub fn sessionId(self: *Self) u64 {
+        return self.private().session_id;
+    }
+
+    fn getSessionEnabled(self: *Self) bool {
+        return !self.isQuickTerminal() and if (self.getConfig()) |c| c.get().@"window-save-state" == .always else false;
+    }
+
+    fn setSessionName(self: *Self, name: []const u8) void {
+        const priv = self.private();
+        if (priv.session_name) |old| glib.free(@ptrCast(@constCast(old)));
+        priv.session_name = glib.ext.dupeZ(u8, name);
+        self.as(gobject.Object).notifyByPspec(properties.@"session-name".impl.param_spec);
+    }
+
+    /// All strings in the captured manifest belong to alloc.
+    pub fn captureSession(self: *Self, alloc: std.mem.Allocator) !sessions.Session {
+        const priv = self.private();
+        var tabs: std.ArrayList(sessions.Tab) = .empty;
+        var selected: usize = 0;
+        for (0..@intCast(priv.tab_view.getNPages())) |i| {
+            const page = priv.tab_view.getNthPage(@intCast(i));
+            const tab = gobject.ext.cast(Tab, page.getChild()) orelse continue;
+            const tree = tab.getSurfaceTree() orelse continue;
+            if (page == priv.tab_view.getSelectedPage()) selected = tabs.items.len;
+            const nodes = try alloc.alloc(sessions.Node, tree.nodes.len);
+            for (tree.nodes, nodes) |node, *out| out.* = switch (node) {
+                .leaf => |surface| .{ .leaf = .{
+                    .id = surface.sessionId(),
+                    .working_directory = if (surface.getSessionWorkingDirectory()) |pwd|
+                        if (std.fs.path.isAbsolute(pwd)) try alloc.dupeSentinel(u8, pwd, 0) else null
+                    else
+                        null,
+                    .title = if (surface.getTitleOverride()) |t| try alloc.dupeSentinel(u8, t, 0) else null,
+                } },
+                .split => |split| .{ .split = .{
+                    .layout = if (split.layout == .horizontal) .horizontal else .vertical,
+                    .ratio = @floatCast(split.ratio),
+                    .left = @intCast(split.left.idx()),
+                    .right = @intCast(split.right.idx()),
+                } },
+            };
+            const active = if (tab.getActiveSurface()) |s| tree.locate(s) else null;
+            try tabs.append(alloc, .{
+                .title = if (tab.getTitleOverride()) |t| try alloc.dupeSentinel(u8, t, 0) else null,
+                .nodes = nodes,
+                .active = if (active) |h| @intCast(h.idx()) else firstLeaf(tree),
+                .zoomed = if (tree.zoomed) |h| @intCast(h.idx()) else null,
+            });
+        }
+        var width: c_int = 800;
+        var height: c_int = 600;
+        self.as(gtk.Window).getDefaultSize(&width, &height);
+        return .{
+            .id = priv.session_id,
+            .name = try alloc.dupeSentinel(u8, priv.session_name orelse "Session", 0),
+            .width = std.math.clamp(width, 1, 32767),
+            .height = std.math.clamp(height, 1, 32767),
+            .maximized = self.as(gtk.Window).isMaximized() != 0,
+            .title = if (priv.title_override) |t| try alloc.dupeSentinel(u8, t, 0) else null,
+            .selected_tab = selected,
+            .tabs = try tabs.toOwnedSlice(alloc),
+        };
+    }
+
+    fn firstLeaf(tree: *const Surface.Tree) u32 {
+        var it = tree.iterator();
+        return @intCast(it.next().?.handle.idx());
+    }
+
+    pub fn saveSession(self: *Self, dir: std.Io.Dir) !bool {
+        if (self.isQuickTerminal() or self.getTabView().getNPages() == 0) return false;
+        var arena: std.heap.ArenaAllocator = .init(Application.default().allocator());
+        defer arena.deinit();
+        const manifest = try self.captureSession(arena.allocator());
+        if (manifest.tabs.len == 0) return false;
+        try manifest.validate();
+        const bytes = try sessions.serialize(arena.allocator(), manifest);
+        const hash = std.hash.Wyhash.hash(0, bytes);
+        if (self.private().session_hash != hash) {
+            var buf: [32]u8 = undefined;
+            try sessions.write(dir, global.io(), try sessions.fileName(&buf, manifest.id), bytes);
+            self.private().session_hash = hash;
+        }
+        return true;
+    }
+
+    pub fn restoreSession(manifest: sessions.Session) !*Self {
+        try manifest.validate();
+        const app = Application.default();
+        const window = Self.new(app, .none);
+        errdefer window.as(gtk.Window).destroy();
+        const priv = window.private();
+        priv.session_id = manifest.id;
+        // Saved window geometry wins over the first shell's initial size.
+        priv.surface_init = true;
+        window.setSessionName(manifest.name);
+        window.setTitleOverride(manifest.title);
+        window.as(gtk.Window).setDefaultSize(manifest.width, manifest.height);
+        if (manifest.maximized) window.as(gtk.Window).maximize() else window.as(gtk.Window).unmaximize();
+        for (manifest.tabs) |saved| {
+            const page = window.newTabPage(null, .tab, .none);
+            const tab = gobject.ext.cast(Tab, page.getChild()).?;
+            const widget = tab.getSplitTree();
+            var tree = try restoreSessionNode(widget, saved.nodes, 0);
+            defer tree.deinit();
+            var active: ?*Surface = null;
+            var it = tree.iterator();
+            while (it.next()) |entry| {
+                if (entry.view.sessionId() == saved.nodes[saved.active].leaf.id) active = entry.view;
+                if (saved.zoomed) |z| {
+                    if (entry.view.sessionId() == saved.nodes[z].leaf.id) tree.zoom(entry.handle);
+                }
+            }
+            if (active) |s| widget.setActiveSurface(s);
+            widget.setTree(&tree);
+            tab.setTitleOverride(saved.title);
+        }
+        priv.tab_view.setSelectedPage(priv.tab_view.getNthPage(@intCast(manifest.selected_tab)));
+        return window;
+    }
+
+    fn restoreSessionNode(widget: *SplitTree, nodes: []const sessions.Node, index: u32) std.mem.Allocator.Error!Surface.Tree {
+        const alloc = Application.default().allocator();
+        switch (nodes[index]) {
+            .leaf => |leaf| {
+                const cwd = cwd: {
+                    const path = leaf.working_directory orelse break :cwd null;
+                    const dir = std.Io.Dir.cwd().openDir(global.io(), path, .{}) catch {
+                        log.warn("session directory no longer available: {s}", .{path});
+                        break :cwd null;
+                    };
+                    dir.close(global.io());
+                    break :cwd path;
+                };
+                const surface: *Surface = .new(.{
+                    .command = null,
+                    .shell_integration = null,
+                    .working_directory = cwd,
+                    .title = leaf.title,
+                });
+                _ = surface.refSink();
+                defer surface.unref();
+                surface.restoreSessionId(leaf.id);
+                surface.bindIsSplit(widget);
+                return Surface.Tree.init(alloc, surface);
+            },
+            .split => |split| {
+                var left = try restoreSessionNode(widget, nodes, split.left);
+                defer left.deinit();
+                var right = try restoreSessionNode(widget, nodes, split.right);
+                defer right.deinit();
+                return left.split(alloc, .root, if (split.layout == .horizontal) .right else .down, @floatCast(split.ratio), &right);
+            },
+        }
+    }
+
+    fn sessionMenuOpened(button: *gtk.MenuButton, _: *gobject.ParamSpec, self: *Self) callconv(.c) void {
+        if (button.getActive() == 0) return;
+        const app = Application.default();
+        app.saveSessions();
+        const menu = self.private().session_menu orelse return;
+        menu.removeAll();
+        menu.append(i18n._("New Session"), "win.new-session");
+        menu.append(i18n._("Rename Session…"), "win.rename-session");
+        var arena: std.heap.ArenaAllocator = .init(app.allocator());
+        defer arena.deinit();
+        const dir = app.sessionDir() catch return;
+        defer dir.close(global.io());
+        const entries = sessions.list(dir, global.io(), arena.allocator()) catch return;
+        const saved = gio.Menu.new();
+        defer saved.unref();
+        for (entries) |entry| {
+            const item = gio.MenuItem.new(entry.name, null);
+            defer item.unref();
+            item.setActionAndTargetValue("win.open-session", glib.Variant.newUint64(entry.id));
+            saved.appendItem(item);
+        }
+        menu.appendSection(i18n._("Sessions"), saved.as(gio.MenuModel));
+    }
+
+    fn actionNewSession(_: *gio.SimpleAction, _: ?*glib.Variant, _: *Self) callconv(.c) void {
+        if (!Application.default().sessionsEnabled()) return;
+        const window = Self.new(Application.default(), .none);
+        window.newTab(null, .none);
+        Application.default().presentSessionWindow(window);
+        window.promptSessionName();
+    }
+
+    fn actionRenameSession(_: *gio.SimpleAction, _: ?*glib.Variant, self: *Self) callconv(.c) void {
+        if (!Application.default().sessionsEnabled()) return;
+        self.promptSessionName();
+    }
+
+    fn promptSessionName(self: *Self) void {
+        const dialog = TitleDialog.new(.session, self.private().session_name);
+        dialog.as(adw.AlertDialog).setBody(i18n._("Name this session to find its tabs and splits later."));
+        _ = TitleDialog.signals.set.connect(dialog, *Self, sessionNameSet, self, .{});
+        dialog.present(self.as(gtk.Widget));
+    }
+
+    fn sessionNameSet(_: *TitleDialog, value: [*:0]const u8, self: *Self) callconv(.c) void {
+        const name = std.mem.trim(u8, std.mem.span(value), &std.ascii.whitespace);
+        if (!sessions.validName(name)) {
+            self.addToast(i18n._("Enter a short session name without line breaks."));
+            return;
+        }
+        self.setSessionName(name);
+        Application.default().saveSessions();
+    }
+
+    fn actionOpenSession(_: *gio.SimpleAction, param: ?*glib.Variant, self: *Self) callconv(.c) void {
+        const value = param orelse return;
+        Application.default().openSession(value.getUint64()) catch |err| {
+            log.warn("unable to open session err={}", .{err});
+            self.addToast(i18n._("Unable to restore this session."));
+        };
+    }
+
     /// Get the current window decoration value for this window.
     pub fn getWindowDecoration(self: *Self) configpkg.WindowDecoration {
         const priv = self.private();
@@ -1103,6 +1359,9 @@ pub const Window = extern struct {
     fn getTabsAutohide(self: *Self) bool {
         const priv = self.private();
         const config = if (priv.config) |v| v.get() else return true;
+
+        // Keep the session selector reachable even with a single tab.
+        if (!self.isQuickTerminal() and config.@"window-save-state" == .always) return false;
 
         return switch (config.@"gtk-titlebar-style") {
             // If the titlebar style is tabs we cannot autohide.
@@ -1458,6 +1717,8 @@ pub const Window = extern struct {
         priv.tab_bindings.unref();
         priv.winproto.deinit();
         if (priv.title_override) |v| glib.free(@ptrCast(@constCast(v)));
+        if (priv.session_name) |v| glib.free(@ptrCast(@constCast(v)));
+        if (priv.session_menu) |menu| menu.unref();
 
         gobject.Object.virtual_methods.finalize.call(
             Class.parent,
@@ -1619,6 +1880,7 @@ pub const Window = extern struct {
             return @intFromBool(true);
         }
 
+        Application.default().saveSessions();
         self.as(gtk.Window).destroy();
         return @intFromBool(false);
     }
@@ -1627,6 +1889,7 @@ pub const Window = extern struct {
         _: *CloseConfirmationDialog,
         self: *Self,
     ) callconv(.c) void {
+        Application.default().saveSessions();
         self.as(gtk.Window).destroy();
     }
 
@@ -1667,6 +1930,8 @@ pub const Window = extern struct {
         const child = page.getChild();
         const tab = gobject.ext.cast(Tab, child) orelse
             return @intFromBool(false);
+
+        if (priv.tab_view.getNPages() == 1) Application.default().saveSessions();
 
         // If the tab says it doesn't need confirmation then we go ahead
         // and close immediately.
@@ -2323,6 +2588,8 @@ pub const Window = extern struct {
 
             // Properties
             gobject.ext.registerProperties(class, &.{
+                properties.@"session-name".impl,
+                properties.@"session-enabled".impl,
                 properties.@"active-surface".impl,
                 properties.config.impl,
                 properties.debug.impl,
@@ -2343,6 +2610,7 @@ pub const Window = extern struct {
             class.bindTemplateChildPrivate("tab_view", .{});
             class.bindTemplateChildPrivate("toolbar", .{});
             class.bindTemplateChildPrivate("toast_overlay", .{});
+            class.bindTemplateChildPrivate("session_button", .{});
 
             // Template Callbacks
             class.bindTemplateCallback("realize", &windowRealize);
@@ -2367,6 +2635,7 @@ pub const Window = extern struct {
             class.bindTemplateCallback("titlebar_style_is_tabs", &closureTitlebarStyleIsTab);
             class.bindTemplateCallback("computed_title", &closureTitle);
             class.bindTemplateCallback("computed_subtitle", &closureSubtitle);
+            class.bindTemplateCallback("session_menu_opened", &sessionMenuOpened);
 
             // Virtual methods
             gobject.Object.virtual_methods.dispose.implement(class, &dispose);

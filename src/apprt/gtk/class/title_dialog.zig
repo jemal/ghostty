@@ -220,12 +220,14 @@ pub const Target = enum(c_int) {
     surface,
     tab,
     window,
+    session,
 
     pub fn title(self: Target) [*:0]const u8 {
         return switch (self) {
             .surface => i18n._("Change Terminal Title"),
             .tab => i18n._("Change Tab Title"),
             .window => i18n._("Change Window Title"),
+            .session => i18n._("Rename Session"),
         };
     }
 

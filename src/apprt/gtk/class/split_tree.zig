@@ -521,6 +521,12 @@ pub const SplitTree = extern struct {
         return tree.nodes[handle.idx()].leaf;
     }
 
+    /// Set focus before a rebuilt widget tree has been mapped.
+    pub fn setActiveSurface(self: *Self, surface: *Surface) void {
+        self.private().last_focused.set(surface);
+        surface.grabFocus();
+    }
+
     fn getActiveSurfaceHandle(self: *Self) ?Surface.Tree.Node.Handle {
         const tree = self.getTree() orelse return null;
         var it = tree.iterator();
