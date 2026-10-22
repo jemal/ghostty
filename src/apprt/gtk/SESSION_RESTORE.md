@@ -261,14 +261,20 @@ cleanup, and config reload to zero or `never`.
 For daily iteration without a Nix-profile rebuild, install from the checkout:
 
 ```sh
-nix develop -c zig build -p ~/.local -Doptimize=ReleaseFast
+nix develop -c zig build -p ~/.local -Doptimize=ReleaseFast -fsys=fontconfig
 ```
 
 Inside an existing development shell, use
-`zig build -p ~/.local -Doptimize=ReleaseFast`. The executable is
+`zig build -p ~/.local -Doptimize=ReleaseFast -fsys=fontconfig`. The executable is
 `~/.local/bin/ghostty`; ensure it takes precedence in PATH. Fully restart the
 application after installing to load the rebuilt binary. Coordinate restarts
 with the user so their running sessions are not interrupted unexpectedly.
+
+On Linux, retain `-fsys=fontconfig` so Ghostty and GTK/Pango use the same
+Fontconfig library. A local build with bundled Fontconfig aborted during font
+zoom on 2026-10-22 while destroying a stale font pattern. Mixing bundled and
+system Fontconfig is a known source of font-cache corruption; see the
+[upstream discussion](https://github.com/ghostty-org/ghostty/discussions/13479).
 
 Do not use isolated X11/Xvfb screenshot capture or screenshot-viewing workflows
 for routine iteration. The user prefers builds, focused logic checks, and

@@ -25,13 +25,13 @@ temporary workflow because full Nix package builds take too long.
 From the repository checkout:
 
 ```sh
-nix develop -c zig build -p ~/.local -Doptimize=ReleaseFast
+nix develop -c zig build -p ~/.local -Doptimize=ReleaseFast -fsys=fontconfig
 ```
 
 When already inside `nix develop`, run:
 
 ```sh
-zig build -p ~/.local -Doptimize=ReleaseFast
+zig build -p ~/.local -Doptimize=ReleaseFast -fsys=fontconfig
 ```
 
 This installs the executable at `~/.local/bin/ghostty` and resources under
@@ -42,6 +42,16 @@ command after changes. Fully quit and restart Ghostty to load the new binary;
 installing it does not update already running processes. Coordinate restarts
 with the user rather than terminating their active sessions automatically.
 Building/installing does not create a commit or update the Nix-profile package.
+
+Retain `-fsys=fontconfig` on Linux. The 2026-10-22 zoom crash (PID 80461)
+aborted with `free(): invalid size` in bundled `FcPatternDestroy`, called from
+font-set destruction. Its stale pattern pointed into a GPU mapping, and both
+bundled and system Fontconfig were present in the process. This matches the
+[known Fontconfig interposition problem](https://github.com/ghostty-org/ghostty/discussions/13479).
+Linking system Fontconfig removes the duplicate implementation. The rebuilt
+binary imports system Fontconfig and passes font discovery. The user reports
+that the fixes seem good in normal desktop use for now; longer-term stability
+remains subject to continued use.
 
 ## UI validation preference: no X11 screenshot workflow
 
@@ -160,8 +170,10 @@ non-color settings through the picker. The external picker protocol is unchanged
 The GTK build and focused theme logic tests passed. Isolated X11 tests and
 screenshots are paused at the user's request; validation proceeds through
 builds, logic checks, and live desktop feedback. The user approved the look and
-basic behavior, but a subsequent ReleaseFast desktop trial exposed another
-focus-lifecycle crash, so this is not yet a settled reliability checkpoint.
+basic behavior. After the subsequent focus-lifecycle crash fixes and the
+system-Fontconfig rebuild, the user reports that the fixes seem good for now.
+Treat this as provisional desktop confirmation rather than an extended
+stability result.
 
 Earlier Escape crashes came from GTK retaining input widgets and emitting
 selection/focus callbacks after picker state was freed. Cleanup disconnects
@@ -170,9 +182,10 @@ those callbacks before releasing state. The later core dump (PID 49534,
 `check_crossing_invariants`: focus-loss cancellation destroyed widgets and
 called `grabFocus` during GTK's own focus-change traversal. The new fix defers
 focus-loss dismissal to an idle callback, cancels that callback on disposal,
-and restores terminal focus only when the picker still owns focus. The ReleaseFast build passed and the fix is installed at
-`~/.local/bin/ghostty`; it requires a full application restart and a new desktop
-check. Existing processes were not stopped or restarted by the agent.
+and restores terminal focus only when the picker still owns focus. The
+ReleaseFast build passed and the fix is installed at `~/.local/bin/ghostty`.
+The user subsequently reported that the fixes seem good for now. Existing
+processes were not stopped or restarted by the agent.
 
 The microfetch color issue was traced to an agent preview-launch environment:
 `NO_COLOR=1` suppressed ANSI colors, making the logo and color swatches use the
