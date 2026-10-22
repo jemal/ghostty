@@ -258,7 +258,24 @@ primary-screen recovery while a fullscreen program was active, inactive-tab
 restoration, missing/corrupt snapshots, size-limit fallback, obsolete-generation
 cleanup, and config reload to zero or `never`.
 
-For a local preview without a Nix profile rebuild, run from the checkout:
+For daily iteration without a Nix-profile rebuild, install from the checkout:
+
+```sh
+nix develop -c zig build -p ~/.local -Doptimize=ReleaseFast
+```
+
+Inside an existing development shell, use
+`zig build -p ~/.local -Doptimize=ReleaseFast`. The executable is
+`~/.local/bin/ghostty`; ensure it takes precedence in PATH. Fully restart the
+application after installing to load the rebuilt binary. Coordinate restarts
+with the user so their running sessions are not interrupted unexpectedly.
+
+Do not use isolated X11/Xvfb screenshot capture or screenshot-viewing workflows
+for routine iteration. The user prefers builds, focused logic checks, and
+feedback from the normal desktop. Historical screenshot checks above do not
+override this preference; resume that workflow only on an explicit request.
+
+For a separate development preview, run from the checkout:
 
 ```sh
 nix develop -c zig build run -- \
