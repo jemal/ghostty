@@ -477,6 +477,16 @@ pub const Tab = extern struct {
         _ = tab_view.selectPreviousPage();
     }
 
+    fn closureComputedTooltip(_: *Self, title: ?[*:0]const u8, cwd: ?[*:0]const u8) callconv(.c) ?[*:0]const u8 {
+        // AdwTabPage interprets tooltips as markup. Keep terminal titles and
+        // directory names literal, including characters such as < and &.
+        const text = title orelse cwd orelse return null;
+        const path = cwd orelse return glib.markupEscapeText(text, -1);
+        if (title == null or std.mem.eql(u8, std.mem.span(text), std.mem.span(path)))
+            return glib.markupEscapeText(text, -1);
+        return glib.markupPrintfEscaped("<b>%s</b>\n%s", text, path);
+    }
+
     fn closureComputedTitle(
         _: *Self,
         config_: ?*Config,
@@ -574,6 +584,7 @@ pub const Tab = extern struct {
 
             // Template Callbacks
             class.bindTemplateCallback("computed_title", &closureComputedTitle);
+            class.bindTemplateCallback("computed_tooltip", &closureComputedTooltip);
             class.bindTemplateCallback("notify_active_surface", &propActiveSurface);
             class.bindTemplateCallback("notify_tree", &propSplitTree);
 

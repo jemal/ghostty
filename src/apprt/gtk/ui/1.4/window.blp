@@ -97,6 +97,11 @@ template $GhosttyWindow: Adw.ApplicationWindow {
         Gtk.Box {
           orientation: horizontal;
 
+          Gtk.WindowControls {
+            side: start;
+            visible: bind $titlebar_style_is_tabs(template.titlebar-style) as <bool>;
+          }
+
           Gtk.MenuButton session_button {
             styles ["flat", "session-selector"]
             visible: bind template.session-enabled;
@@ -110,19 +115,14 @@ template $GhosttyWindow: Adw.ApplicationWindow {
               Gtk.Label {
                 label: bind template.session-name;
                 ellipsize: end;
-                max-width-chars: 20;
+                max-width-chars: bind $session_name_width(template.tabs-compact) as <int>;
               }
               Gtk.Image { icon-name: "pan-down-symbolic"; }
             };
           }
 
-          Gtk.WindowControls {
-            side: start;
-            visible: bind $titlebar_style_is_tabs(template.titlebar-style) as <bool>;
-          }
-
           Adw.SplitButton {
-            visible: bind $titlebar_style_is_tabs(template.titlebar-style) as <bool>;
+            visible: bind $native_tab_controls(template.titlebar-style, template.tabs-compact) as <bool>;
             styles [
               "flat",
             ]
@@ -142,7 +142,18 @@ template $GhosttyWindow: Adw.ApplicationWindow {
           orientation: horizontal;
           visible: bind $titlebar_style_is_tabs(template.titlebar-style) as <bool>;
 
+          Gtk.Button {
+            styles ["flat"]
+            visible: bind $compact_tab_controls(template.titlebar-style, template.tabs-compact) as <bool>;
+            icon-name: "tab-new-symbolic";
+            tooltip-text: _("New Tab");
+            action-name: "win.new-tab";
+            can-focus: false;
+            focus-on-click: false;
+          }
+
           Gtk.ToggleButton {
+            visible: bind $native_tab_controls(template.titlebar-style, template.tabs-compact) as <bool>;
             styles [
               "flat",
             ]
@@ -261,6 +272,11 @@ menu main_menu {
   }
 
   section {
+    item {
+      label: _("View Open Tabs");
+      action: "win.toggle-tab-overview";
+    }
+
     item {
       label: _("Change Tab Title…");
       action: "win.prompt-tab-title";

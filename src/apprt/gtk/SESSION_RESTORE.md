@@ -31,8 +31,12 @@ compact mode overrides `gtk-wide-tabs` without changing its configured value.
 The style works with top or bottom tabs, inverted close buttons, and either
 GTK titlebar style. Native tab selection, close buttons, dragging, overflow,
 and overview remain available. For a single row of tabs and window controls,
-combine it with `gtk-titlebar-style = tabs`. Chrome colors continue to follow
-`window-theme`. Visibility remains controlled by the existing titlebar and
+combine it with `gtk-titlebar-style = tabs`. This uses a single new-tab button
+on the right and moves overview and split actions into the main menu, giving
+tabs more room. Long session names are shortened in the strip and remain fully
+visible in their tooltip. Tab tooltips show the full title and working
+directory, including when the title fades to fit the available width.
+Chrome colors continue to follow `window-theme`. Visibility remains controlled by the existing titlebar and
 tab-bar options.
 
 ## Storage
@@ -106,3 +110,18 @@ Check styled output and scrollback across restart, fresh shell PIDs and input,
 primary-screen recovery while a fullscreen program was active, inactive-tab
 restoration, missing/corrupt snapshots, size-limit fallback, obsolete-generation
 cleanup, and config reload to zero or `never`.
+
+For a local preview without a Nix profile rebuild, run from the checkout:
+
+```sh
+nix develop -c zig build run -- \
+  --class=com.mitchellh.ghostty.preview \
+  --gtk-single-instance=false \
+  --gtk-tabs-style=compact \
+  --gtk-titlebar-style=tabs
+```
+
+The preview application ID keeps its named sessions separate from the installed
+application. The normal configuration still supplies themes and keybindings.
+Alternatively, `nix develop -c zig build` installs the development executable at
+`zig-out/bin/ghostty`, which accepts the same flags.

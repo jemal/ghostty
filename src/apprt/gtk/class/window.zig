@@ -48,6 +48,14 @@ pub const Window = extern struct {
     });
 
     pub const properties = struct {
+        pub const @"tabs-compact" = struct {
+            pub const name = "tabs-compact";
+            const impl = gobject.ext.defineProperty(name, Self, bool, .{
+                .default = false,
+                .accessor = gobject.ext.typedAccessor(Self, bool, .{ .getter = getTabsCompact }),
+            });
+        };
+
         pub const @"session-enabled" = struct {
             pub const name = "session-enabled";
             const impl = gobject.ext.defineProperty(name, Self, bool, .{
@@ -448,6 +456,7 @@ pub const Window = extern struct {
             .init("clear", actionClear, null),
             // TODO: accept the surface that toggled the command palette
             .init("toggle-command-palette", actionToggleCommandPalette, null),
+            .init("toggle-tab-overview", actionToggleTabOverview, null),
             .init("toggle-inspector", actionToggleInspector, null),
         };
 
@@ -735,6 +744,7 @@ pub const Window = extern struct {
         inline for (&.{
             "headerbar-visible",
             "tabs-autohide",
+            "tabs-compact",
             "session-enabled",
             "tabs-inverted",
             "tabs-visible",
@@ -1414,6 +1424,11 @@ pub const Window = extern struct {
         return config.@"gtk-tabs-style" != .compact and config.@"gtk-wide-tabs";
     }
 
+    fn getTabsCompact(self: *Self) bool {
+        const config = self.private().config orelse return false;
+        return config.get().@"gtk-tabs-style" == .compact;
+    }
+
     fn getToolbarStyle(self: *Self) adw.ToolbarStyle {
         const priv = self.private();
         const config = if (priv.config) |v| v.get() else return .raised;
@@ -1610,6 +1625,18 @@ pub const Window = extern struct {
             .native => false,
             .tabs => true,
         });
+    }
+
+    fn closureNativeTabControls(_: *Self, style: TitlebarStyle, compact: c_int) callconv(.c) c_int {
+        return @intFromBool(style == .tabs and compact == 0);
+    }
+
+    fn closureCompactTabControls(_: *Self, style: TitlebarStyle, compact: c_int) callconv(.c) c_int {
+        return @intFromBool(style == .tabs and compact != 0);
+    }
+
+    fn closureSessionNameWidth(_: *Self, compact: c_int) callconv(.c) c_int {
+        return if (compact != 0) 12 else 20;
     }
 
     pub fn setTitleOverride(self: *Self, title: ?[]const u8) void {
@@ -2543,6 +2570,10 @@ pub const Window = extern struct {
         self.toggleCommandPalette();
     }
 
+    fn actionToggleTabOverview(_: *gio.SimpleAction, _: ?*glib.Variant, self: *Self) callconv(.c) void {
+        self.toggleTabOverview();
+    }
+
     /// Toggle the Ghostty inspector for the active surface.
     fn toggleInspector(self: *Self) void {
         const surface = self.getActiveSurface() orelse return;
@@ -2595,6 +2626,7 @@ pub const Window = extern struct {
                 properties.@"headerbar-visible".impl,
                 properties.@"quick-terminal".impl,
                 properties.@"tabs-autohide".impl,
+                properties.@"tabs-compact".impl,
                 properties.@"tabs-inverted".impl,
                 properties.@"tabs-visible".impl,
                 properties.@"tabs-wide".impl,
@@ -2632,6 +2664,9 @@ pub const Window = extern struct {
             class.bindTemplateCallback("notify_quick_terminal", &propQuickTerminal);
             class.bindTemplateCallback("notify_scale_factor", &propScaleFactor);
             class.bindTemplateCallback("titlebar_style_is_tabs", &closureTitlebarStyleIsTab);
+            class.bindTemplateCallback("native_tab_controls", &closureNativeTabControls);
+            class.bindTemplateCallback("compact_tab_controls", &closureCompactTabControls);
+            class.bindTemplateCallback("session_name_width", &closureSessionNameWidth);
             class.bindTemplateCallback("computed_title", &closureTitle);
             class.bindTemplateCallback("computed_subtitle", &closureSubtitle);
             class.bindTemplateCallback("session_menu_opened", &sessionMenuOpened);

@@ -16,7 +16,10 @@ template $GhosttyTab: Box {
     split_tree.is-zoomed,
     split_tree.active-surface as <$GhosttySurface>.bell-ringing
     ) as <string>;
-  tooltip: bind split_tree.active-surface as <$GhosttySurface>.pwd;
+  tooltip: bind $computed_tooltip(
+    template.title,
+    split_tree.active-surface as <$GhosttySurface>.pwd
+    ) as <string>;
 
   $GhosttySplitTree split_tree {
     notify::active-surface => $notify_active_surface();
