@@ -164,6 +164,61 @@ pub fn load(dir: std.Io.Dir, io: std.Io, alloc: Allocator, id: u64) !std.json.Pa
 
 pub const Entry = struct { id: u64, name: [:0]const u8 };
 
+/// Move only the manifest. Immutable snapshots remain available in the main
+/// store and are still identified by the same session and pane IDs.
+pub fn setArchived(dir: std.Io.Dir, io: std.Io, id: u64, archived: bool) !void {
+    if (id == 0) return error.InvalidSession;
+    const archive = try dir.createDirPathOpen(io, "archived", .{
+        .permissions = .fromMode(0o700),
+        .open_options = .{ .iterate = true },
+    });
+    defer archive.close(io);
+    var buf: [32]u8 = undefined;
+    const name = try fileName(&buf, id);
+    const source = if (archived) dir else archive;
+    const dest = if (archived) archive else dir;
+    // Never overwrite another manifest when recovering inconsistent stores.
+    try source.renamePreserve(name, dest, name, io);
+}
+
+pub fn listArchived(dir: std.Io.Dir, io: std.Io, alloc: Allocator) ![]Entry {
+    const archive = dir.openDir(io, "archived", .{ .iterate = true }) catch |err| switch (err) {
+        error.FileNotFound => return &.{},
+        else => return err,
+    };
+    defer archive.close(io);
+    return list(archive, io, alloc);
+}
+
+/// Remove the manifest first so a partial snapshot cleanup never leaves a
+/// restorable session referring to deleted contents. Retrying is harmless.
+pub fn delete(dir: std.Io.Dir, io: std.Io, id: u64) !void {
+    if (id == 0) return error.InvalidSession;
+    var buf: [32]u8 = undefined;
+    const name = try fileName(&buf, id);
+    dir.deleteFile(io, name) catch |err| switch (err) {
+        error.FileNotFound => {},
+        else => return err,
+    };
+    if (dir.openDir(io, "archived", .{})) |archive| {
+        defer archive.close(io);
+        archive.deleteFile(io, name) catch |err| switch (err) {
+            error.FileNotFound => {},
+            else => return err,
+        };
+    } else |err| switch (err) {
+        error.FileNotFound => {},
+        else => return err,
+    }
+    const prefix = try std.mem.print(&buf, "{x}-", .{id});
+    var it = dir.iterate();
+    while (try it.next(io)) |entry| {
+        if (entry.kind == .file and std.mem.startsWith(u8, entry.name, prefix) and
+            std.mem.endsWith(u8, entry.name, ".snapshot"))
+            try dir.deleteFile(io, entry.name);
+    }
+}
+
 /// Result strings belong to alloc (normally a short-lived arena). A corrupt
 /// session is skipped without hiding the remaining sessions.
 pub fn list(dir: std.Io.Dir, io: std.Io, alloc: Allocator) ![]Entry {
@@ -259,4 +314,51 @@ test "session storage commits atomically and isolates corrupt sessions" {
     const entries = try list(tmp.dir, testing.io, arena.allocator());
     try testing.expectEqual(@as(usize, 1), entries.len);
     try testing.expectEqualStrings("Work", entries[0].name);
+}
+
+test "session archive preserves contents and deletion stays within its ID" {
+    const testing = std.testing;
+    var tmp = testing.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+    const value: Session = .{ .id = 1, .name = "Work", .tabs = &.{.{
+        .nodes = &.{.{ .leaf = .{ .id = 2, .snapshot = 3 } }},
+    }} };
+    const bytes = try serialize(alloc, value);
+    try write(tmp.dir, testing.io, "1.json", bytes);
+    try write(tmp.dir, testing.io, "1-2-3.snapshot", "saved contents");
+    try write(tmp.dir, testing.io, "1-2-4.snapshot", "obsolete generation");
+    try write(tmp.dir, testing.io, "10-2-3.snapshot", "other session");
+    try write(tmp.dir, testing.io, "active.json", "index");
+    try testing.expectEqual(@as(usize, 0), (try listArchived(tmp.dir, testing.io, alloc)).len);
+    try setArchived(tmp.dir, testing.io, 1, true);
+    try testing.expectEqual(@as(usize, 0), (try list(tmp.dir, testing.io, alloc)).len);
+    const entries = try listArchived(tmp.dir, testing.io, alloc);
+    try testing.expectEqual(@as(usize, 1), entries.len);
+    try testing.expectEqualStrings("Work", entries[0].name);
+    try testing.expectEqualStrings("saved contents", try tmp.dir.readFileAlloc(testing.io, "1-2-3.snapshot", alloc, .limited(100)));
+
+    // Unarchiving refuses to overwrite an existing manifest.
+    try write(tmp.dir, testing.io, "1.json", bytes);
+    try testing.expectError(error.PathAlreadyExists, setArchived(tmp.dir, testing.io, 1, false));
+    try tmp.dir.deleteFile(testing.io, "1.json");
+    try setArchived(tmp.dir, testing.io, 1, false);
+    const restored = try load(tmp.dir, testing.io, testing.allocator, 1);
+    defer restored.deinit();
+    try testing.expectEqualDeep(value, restored.value);
+    try testing.expectEqual(@as(usize, 0), (try listArchived(tmp.dir, testing.io, alloc)).len);
+    try setArchived(tmp.dir, testing.io, 1, true);
+    try delete(tmp.dir, testing.io, 1);
+    try delete(tmp.dir, testing.io, 1);
+    try testing.expectEqual(@as(usize, 0), (try listArchived(tmp.dir, testing.io, alloc)).len);
+    try testing.expectError(error.FileNotFound, tmp.dir.access(testing.io, "1-2-3.snapshot", .{}));
+    try testing.expectError(error.FileNotFound, tmp.dir.access(testing.io, "1-2-4.snapshot", .{}));
+    try testing.expectEqualStrings("other session", try tmp.dir.readFileAlloc(testing.io, "10-2-3.snapshot", alloc, .limited(100)));
+    try testing.expectEqualStrings("index", try tmp.dir.readFileAlloc(testing.io, "active.json", alloc, .limited(100)));
+    // Non-archived sessions are deleted through the same operation.
+    try write(tmp.dir, testing.io, "1.json", bytes);
+    try delete(tmp.dir, testing.io, 1);
+    try testing.expectError(error.FileNotFound, tmp.dir.access(testing.io, "1.json", .{}));
 }

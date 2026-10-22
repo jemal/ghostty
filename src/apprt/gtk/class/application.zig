@@ -1590,16 +1590,39 @@ pub const Application = extern struct {
 
     const SessionIndex = struct { version: u32 = sessions.version, sessions: []const u64 };
 
-    pub fn openSession(self: *Self, id: u64) !void {
-        if (!self.sessionsEnabled()) return;
+    pub fn sessionWindow(self: *Self, id: u64) ?*Window {
         var current: ?*glib.List = self.as(gtk.Application).getWindows();
         while (current) |link| : (current = link.f_next) {
             const ptr: *gtk.Window = @ptrCast(@alignCast(link.f_data orelse continue));
             const window = gobject.ext.cast(Window, ptr) orelse continue;
-            if (!window.isQuickTerminal() and window.sessionId() == id) {
-                window.as(gtk.Window).present();
-                return;
-            }
+            if (!window.isQuickTerminal() and window.sessionId() == id) return window;
+        }
+        return null;
+    }
+
+    pub fn archiveSession(self: *Self, id: u64, archived: bool) !void {
+        if (!self.sessionsEnabled()) return error.SessionsDisabled;
+        if (self.sessionWindow(id) != null) return error.SessionOpen;
+        self.saveSessions();
+        const dir = try self.sessionDir();
+        defer dir.close(global.io());
+        try sessions.setArchived(dir, global.io(), id, archived);
+    }
+
+    pub fn deleteSession(self: *Self, id: u64) !void {
+        if (!self.sessionsEnabled()) return error.SessionsDisabled;
+        if (self.sessionWindow(id) != null) return error.SessionOpen;
+        self.saveSessions();
+        const dir = try self.sessionDir();
+        defer dir.close(global.io());
+        try sessions.delete(dir, global.io(), id);
+    }
+
+    pub fn openSession(self: *Self, id: u64) !void {
+        if (!self.sessionsEnabled()) return;
+        if (self.sessionWindow(id)) |window| {
+            window.as(gtk.Window).present();
+            return;
         }
         const dir = try self.sessionDir();
         defer dir.close(global.io());

@@ -21,6 +21,16 @@ in the last active-session index. Closing the last window retains that
 session for the next activation, including when a hidden quick terminal keeps
 the application running. Quick terminals are not persisted.
 
+Use **Manage Closed Sessions** in the session menu to archive or delete a saved
+session. Archiving hides it from the normal picker while keeping its layout
+and snapshots. **Archived Sessions** lets you unarchive it or delete it.
+Unarchiving returns it to the picker without opening a window.
+
+Deletion asks for confirmation and permanently removes the saved layout and
+all snapshot generations belonging to that session. Open sessions must be
+closed first; these operations never terminate a running session. The app
+finishes pending saves before modifying storage.
+
 ## Compact tabs
 
 `gtk-tabs-style = compact` adds a shared rounded tab rail, a raised selected
@@ -103,6 +113,8 @@ that behavior here.
 per session plus `active.json`, which lists the sessions to restore. Display
 names never form paths. Pane IDs and session IDs are independent of runtime
 IPC IDs and remain stable across restoration.
+Archived manifests live in the `archived/` subdirectory; their snapshots stay
+in the main directory so archiving and unarchiving only rename the manifest.
 
 The application captures layout every two seconds and saves terminal contents
 and files on a background worker. Opening the session menu, closing a window,
