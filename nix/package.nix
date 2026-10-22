@@ -55,7 +55,7 @@ in
       );
     };
 
-    deps = callPackage ../build.zig.zon.nix {name = "ghostty-cache-${finalAttrs.version}";};
+    deps = callPackage ../build.zig.zon.nix {name = "ghostty-cache";};
 
     nativeBuildInputs =
       [

@@ -38,7 +38,7 @@ stdenv.mkDerivation (finalAttrs: {
   };
 
   deps = callPackage ../build.zig.zon.nix {
-    name = "${finalAttrs.pname}-cache-${finalAttrs.version}";
+    name = "ghostty-cache";
   };
 
   nativeBuildInputs =
