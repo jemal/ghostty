@@ -5518,6 +5518,12 @@ pub fn performBindingAction(self: *Surface, action: input.Binding.Action) !bool 
             },
         ),
 
+        inline .move_split, .swap_split => |direction, tag| {
+            if (comptime @hasDecl(apprt.Surface, "rearrangeSplit"))
+                return try self.rt_surface.rearrangeSplit(direction, tag == .swap_split);
+            return false;
+        },
+
         .goto_window => |direction| return try self.rt_app.performAction(
             .{ .surface = self },
             .goto_window,

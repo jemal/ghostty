@@ -378,6 +378,38 @@ pub const SplitTree = extern struct {
         return true;
     }
 
+    /// Rearrange a pane with its spatial neighbor without wrapping. Reuse the
+    /// drag operation for movement so keyboard and pointer placement agree.
+    pub fn rearrange(
+        self: *Self,
+        source: *Surface,
+        direction: Surface.Tree.Split.Direction,
+        swap: bool,
+    ) Allocator.Error!bool {
+        const alloc = Application.default().allocator();
+        const tree = self.getTree() orelse return false;
+        const from = tree.locate(source) orelse return false;
+        const to = try tree.neighbor(alloc, from, switch (direction) {
+            .left => .left,
+            .right => .right,
+            .up => .up,
+            .down => .down,
+        }) orelse return false;
+
+        if (swap) {
+            var swapped = try tree.swapLeaves(alloc, from, to);
+            defer swapped.deinit();
+            swapped.zoomed = null;
+            self.setTree(&swapped);
+        } else {
+            try self.moveSplit(source, tree.nodes[to.idx()].leaf, direction);
+        }
+
+        // Rebuilding reparents the widgets; restore focus to the same pane.
+        self.private().last_focused.set(source);
+        return true;
+    }
+
     /// Move the source split onto the target split in a given direction.
     /// The target split must be located within this tree.
     pub fn moveSplit(

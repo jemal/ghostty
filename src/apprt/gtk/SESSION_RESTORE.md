@@ -66,6 +66,37 @@ windows use the configured value. Showing a toolbar respects the existing
 headerbar and tab visibility options. Both top and bottom toolbars are covered;
 window-manager decorations are controlled separately. This feature is GTK only.
 
+## Moving panes with the keyboard
+
+GTK supports `move_split:left|right|up|down` and
+`swap_split:left|right|up|down` within the current tab. For example:
+
+```ini
+keybind = ctrl+alt+shift+left=move_split:left
+keybind = ctrl+alt+shift+right=move_split:right
+keybind = ctrl+alt+shift+up=move_split:up
+keybind = ctrl+alt+shift+down=move_split:down
+keybind = super+alt+left=swap_split:left
+keybind = super+alt+right=swap_split:right
+keybind = super+alt+up=swap_split:up
+keybind = super+alt+down=swap_split:down
+```
+
+These are examples, with no default shortcuts assigned. Your desktop may
+reserve some combinations; choose bindings that are free in your environment.
+The command palette also offers all eight actions.
+
+Movement uses the same placement as dragging a pane onto its neighbor's edge:
+the source's old branch collapses and the target is split equally, placing
+the source on the requested side. Swapping exchanges the two panes while
+keeping every divider and ratio intact. Both use the nearest pane in the
+requested direction, do nothing at an outer edge, retain keyboard focus on
+the same running terminal, and reveal the full layout if it was zoomed.
+Rearranged layouts are included in normal session saves.
+
+The old personal fork's `move_split` exchanged panes; use `swap_split` for
+that behavior here.
+
 ## Storage
 
 `$XDG_STATE_HOME/ghostty/sessions/<application-id>/` contains one `<id>.json`

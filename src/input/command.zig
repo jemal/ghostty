@@ -533,6 +533,52 @@ fn actionCommands(action: Action.Key) []const Command {
             },
         },
 
+        .move_split => comptime &.{
+            .{
+                .action = .{ .move_split = .left },
+                .title = i18n.N_("Move Split: Left"),
+                .description = i18n.N_("Move beside the nearest pane to the left (GTK only)."),
+            },
+            .{
+                .action = .{ .move_split = .right },
+                .title = i18n.N_("Move Split: Right"),
+                .description = i18n.N_("Move beside the nearest pane to the right (GTK only)."),
+            },
+            .{
+                .action = .{ .move_split = .up },
+                .title = i18n.N_("Move Split: Up"),
+                .description = i18n.N_("Move beside the nearest pane above (GTK only)."),
+            },
+            .{
+                .action = .{ .move_split = .down },
+                .title = i18n.N_("Move Split: Down"),
+                .description = i18n.N_("Move beside the nearest pane below (GTK only)."),
+            },
+        },
+
+        .swap_split => comptime &.{
+            .{
+                .action = .{ .swap_split = .left },
+                .title = i18n.N_("Swap Split: Left"),
+                .description = i18n.N_("Swap with the nearest pane to the left (GTK only)."),
+            },
+            .{
+                .action = .{ .swap_split = .right },
+                .title = i18n.N_("Swap Split: Right"),
+                .description = i18n.N_("Swap with the nearest pane to the right (GTK only)."),
+            },
+            .{
+                .action = .{ .swap_split = .up },
+                .title = i18n.N_("Swap Split: Up"),
+                .description = i18n.N_("Swap with the nearest pane above (GTK only)."),
+            },
+            .{
+                .action = .{ .swap_split = .down },
+                .title = i18n.N_("Swap Split: Down"),
+                .description = i18n.N_("Swap with the nearest pane below (GTK only)."),
+            },
+        },
+
         .goto_window => comptime &.{
             .{
                 .action = .{ .goto_window = .previous },

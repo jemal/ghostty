@@ -655,6 +655,21 @@ pub const Action = union(enum) {
     /// (`previous` and `next`).
     goto_split: SplitFocusDirection,
 
+    /// Move the focused pane beside the nearest pane in the given direction,
+    /// using the same placement as dragging onto that pane's edge. The target
+    /// is split equally and the source's old branch is collapsed.
+    /// Valid directions are `left`, `right`, `up`, and `down`.
+    /// Does nothing at an outer edge. Focus follows the moved pane and zoom
+    /// is cleared to reveal the layout. Only implemented on GTK.
+    move_split: SplitResizeDirection,
+
+    /// Exchange the focused pane with the nearest pane in the given direction
+    /// without changing split orientations or ratios. Valid directions are
+    /// `left`, `right`, `up`, and `down`. Does nothing at an outer edge.
+    /// Focus follows the swapped pane and zoom is cleared to reveal the layout.
+    /// Only implemented on GTK.
+    swap_split: SplitResizeDirection,
+
     /// Focus on either the previous window or the next one ('previous', 'next')
     goto_window: GotoWindow,
 
@@ -1459,6 +1474,8 @@ pub const Action = union(enum) {
             .toggle_toolbar,
             .new_split,
             .goto_split,
+            .move_split,
+            .swap_split,
             .goto_window,
             .toggle_split_zoom,
             .toggle_readonly,
@@ -3416,6 +3433,23 @@ test "parse: action with enum with default" {
         const binding = try parseSingle("a=new_split");
         try testing.expect(binding.action == .new_split);
         try testing.expectEqual(Action.SplitDirection.auto, binding.action.new_split);
+    }
+}
+
+test "parse: action rearrange splits" {
+    const testing = std.testing;
+    inline for (.{ "move_split", "swap_split" }) |name| {
+        inline for (.{ "left", "right", "up", "down" }) |direction| {
+            const binding = try parseSingle("ctrl+alt+a=" ++ name ++ ":" ++ direction);
+            try testing.expectEqual(
+                @field(Action.SplitResizeDirection, direction),
+                @field(binding.action, name),
+            );
+            try testing.expectEqual(.surface, binding.action.scope());
+        }
+        inline for (.{ "", ":auto", ":next", ":previous", ":sideways" }) |suffix| {
+            try testing.expectError(Error.InvalidFormat, parseSingle("a=" ++ name ++ suffix));
+        }
     }
 }
 

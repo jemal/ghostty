@@ -284,6 +284,41 @@ pub fn SplitTree(comptime V: type) type {
 
         pub const Side = enum { left, right };
 
+        /// Find the nearest pane without wrapping across an outer edge.
+        pub fn neighbor(
+            self: *const Self,
+            alloc: Allocator,
+            from: Node.Handle,
+            direction: Spatial.Direction,
+        ) Allocator.Error!?Node.Handle {
+            var sp = try self.spatial(alloc);
+            defer sp.deinit(alloc);
+            // Adjacent boundaries are calculated independently in f16. Allow
+            // their rounding error so a shared divider cannot hide a neighbor.
+            return self.nearest(sp, from, direction, sp.slots[from.idx()], 2 * std.math.floatEps(f16));
+        }
+
+        /// Exchange two leaves while preserving the geometry. Zoom follows
+        /// the view rather than its previous position. The original is unchanged.
+        pub fn swapLeaves(
+            self: *const Self,
+            alloc: Allocator,
+            a: Node.Handle,
+            b: Node.Handle,
+        ) Allocator.Error!Self {
+            assert(self.nodes[a.idx()] == .leaf);
+            assert(self.nodes[b.idx()] == .leaf);
+            var result = try self.clone(alloc);
+            const nodes = @constCast(result.nodes);
+            std.mem.swap(Node, &nodes[a.idx()], &nodes[b.idx()]);
+            if (result.zoomed == a) {
+                result.zoomed = b;
+            } else if (result.zoomed == b) {
+                result.zoomed = a;
+            }
+            return result;
+        }
+
         /// Returns the deepest view in the tree in the given direction.
         /// This can be used to find the leftmost/rightmost surface within
         /// a given split structure.
@@ -405,6 +440,7 @@ pub fn SplitTree(comptime V: type) type {
             from: Node.Handle,
             direction: Spatial.Direction,
             target: Spatial.Slot,
+            tolerance: f16,
         ) ?Node.Handle {
             var result: ?struct {
                 handle: Node.Handle,
@@ -422,10 +458,10 @@ pub fn SplitTree(comptime V: type) type {
 
                 // Ensure it is in the proper direction
                 if (!switch (direction) {
-                    .left => slot.maxX() <= target.x,
-                    .right => slot.x >= target.maxX(),
-                    .up => slot.maxY() <= target.y,
-                    .down => slot.y >= target.maxY(),
+                    .left => slot.maxX() <= target.x + tolerance,
+                    .right => slot.x + tolerance >= target.maxX(),
+                    .up => slot.maxY() <= target.y + tolerance,
+                    .down => slot.y + tolerance >= target.maxY(),
                 }) continue;
 
                 // Track our distance
@@ -461,6 +497,7 @@ pub fn SplitTree(comptime V: type) type {
                 from,
                 direction,
                 target,
+                0,
             )) |v| return v;
 
             // The spatial grid is normalized to 1x1, so wrapping is modeled
@@ -482,6 +519,7 @@ pub fn SplitTree(comptime V: type) type {
                 from,
                 direction,
                 target,
+                0,
             );
         }
 
@@ -1391,6 +1429,75 @@ const TestView = struct {
         return self.label;
     }
 };
+
+test "SplitTree: rearrange leaves" {
+    const testing = std.testing;
+    const alloc = testing.allocator;
+    var a: TestView = .{ .label = "A" };
+    var b: TestView = .{ .label = "B" };
+    var c: TestView = .{ .label = "C" };
+    var ta = try TestTree.init(alloc, &a);
+    defer ta.deinit();
+    var tb = try TestTree.init(alloc, &b);
+    defer tb.deinit();
+    var tc = try TestTree.init(alloc, &c);
+    defer tc.deinit();
+
+    try testing.expectEqual(null, try ta.neighbor(alloc, .root, .right));
+
+    // A occupies the left column; B and C share the right column.
+    var columns = try ta.split(alloc, .root, .right, 0.3, &tb);
+    defer columns.deinit();
+    var nested = try columns.split(alloc, @fromBackingInt(1), .down, 0.7, &tc);
+    defer nested.deinit();
+    var handles: [3]TestTree.Node.Handle = undefined;
+    var it = nested.iterator();
+    while (it.next()) |entry| handles[entry.view.label[0] - 'A'] = entry.handle;
+    const ha = handles[0];
+    const hb = handles[1];
+    const hc = handles[2];
+    try testing.expectEqual(hb, (try nested.neighbor(alloc, ha, .right)).?);
+    try testing.expectEqual(ha, (try nested.neighbor(alloc, hb, .left)).?);
+    try testing.expectEqual(hc, (try nested.neighbor(alloc, hb, .down)).?);
+    try testing.expectEqual(hb, (try nested.neighbor(alloc, hc, .up)).?);
+    try testing.expectEqual(null, try nested.neighbor(alloc, ha, .left));
+    try testing.expectEqual(null, try nested.neighbor(alloc, hb, .up));
+    try testing.expectEqual(null, try nested.neighbor(alloc, hc, .down));
+    try testing.expectEqual(null, try nested.neighbor(alloc, hc, .right));
+
+    // Swap across nesting levels, retaining geometry and following zoom.
+    nested.zoom(ha);
+    var swapped = try nested.swapLeaves(alloc, ha, hc);
+    defer swapped.deinit();
+    try testing.expectEqualStrings("A", nested.nodes[ha.idx()].leaf.label);
+    try testing.expectEqualStrings("C", swapped.nodes[ha.idx()].leaf.label);
+    try testing.expectEqualStrings("A", swapped.nodes[hc.idx()].leaf.label);
+    try testing.expectEqualStrings("B", swapped.nodes[hb.idx()].leaf.label);
+    try testing.expectEqual(ha, nested.zoomed.?);
+    try testing.expectEqual(hc, swapped.zoomed.?);
+    for (nested.nodes, swapped.nodes) |before, after| {
+        if (before == .split) try testing.expectEqualDeep(before.split, after.split);
+    }
+    var restored = try swapped.swapLeaves(alloc, ha, hc);
+    defer restored.deinit();
+    try testing.expectEqual(ha, restored.zoomed.?);
+    try testing.expectEqualStrings("A", restored.nodes[ha.idx()].leaf.label);
+
+    // The same handle is a harmless identity operation.
+    var same = try nested.swapLeaves(alloc, hb, hb);
+    defer same.deinit();
+    try testing.expectEqual(ha, same.zoomed.?);
+    try testing.expectEqualStrings("B", same.nodes[hb.idx()].leaf.label);
+
+    // Rounding at a shared boundary must not skip the adjacent pane.
+    var rows = try ta.split(alloc, .root, .down, 0.7, &tb);
+    defer rows.deinit();
+    var three_rows = try rows.split(alloc, @fromBackingInt(1), .down, 0.5, &tc);
+    defer three_rows.deinit();
+    it = three_rows.iterator();
+    while (it.next()) |entry| handles[entry.view.label[0] - 'A'] = entry.handle;
+    try testing.expectEqual(handles[1], (try three_rows.neighbor(alloc, handles[2], .up)).?);
+}
 
 test "SplitTree: isSplit" {
     const testing = std.testing;

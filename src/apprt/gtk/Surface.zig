@@ -41,6 +41,23 @@ pub fn toggleToolbar(self: *Self) bool {
     return true;
 }
 
+pub fn rearrangeSplit(
+    self: *Self,
+    direction: @import("../../input/Binding.zig").Action.SplitResizeDirection,
+    swap: bool,
+) !bool {
+    const tree = @import("ext.zig").getAncestor(
+        @import("class/split_tree.zig").SplitTree,
+        self.surface.as(@import("gtk").Widget),
+    ) orelse return false;
+    return tree.rearrange(self.surface, switch (direction) {
+        .left => .left,
+        .right => .right,
+        .up => .up,
+        .down => .down,
+    }, swap);
+}
+
 pub fn rtApp(self: *Self) *ApprtApp {
     _ = self;
     return Application.default().rt();
