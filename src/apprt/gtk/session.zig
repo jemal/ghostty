@@ -74,11 +74,11 @@ pub const Tab = struct {
             if (z >= self.nodes.len or self.nodes[z] != .leaf) return error.InvalidTree;
         }
         var seen: [max_nodes]bool = @splat(false);
-        try self.visit(0, 0, &seen);
+        try self.visit(0, 0, false, &seen);
         for (seen[0..self.nodes.len]) |visited| if (!visited) return error.InvalidTree;
     }
 
-    fn visit(self: Tab, index: u32, depth: usize, seen: []bool) error{InvalidTree}!void {
+    fn visit(self: Tab, index: u32, depth: usize, in_stack: bool, seen: []bool) error{InvalidTree}!void {
         if (depth > 64 or index >= self.nodes.len or seen[index]) return error.InvalidTree;
         seen[index] = true;
         switch (self.nodes[index]) {
@@ -88,10 +88,26 @@ pub const Tab = struct {
             .split => |split| {
                 if (!std.math.isFinite(split.ratio) or split.ratio < 0 or split.ratio > 1)
                     return error.InvalidTree;
-                try self.visit(split.left, depth + 1, seen);
-                try self.visit(split.right, depth + 1, seen);
+                if ((in_stack and split.stacked) or (!split.stacked and split.stack_selected != null)) return error.InvalidTree;
+                try self.visit(split.left, depth + 1, in_stack or split.stacked, seen);
+                try self.visit(split.right, depth + 1, in_stack or split.stacked, seen);
+                if (split.stacked) {
+                    const info = self.stackInfo(index, split.stack_selected);
+                    if (info.count > 32 or (split.stack_selected != null and info.matches != 1)) return error.InvalidTree;
+                }
             },
         }
+    }
+
+    fn stackInfo(self: Tab, index: u32, selected: ?u64) struct { count: usize, matches: usize } {
+        return switch (self.nodes[index]) {
+            .leaf => |leaf| .{ .count = 1, .matches = @intFromBool(selected != null and selected.? == leaf.id) },
+            .split => |split| result: {
+                const left = self.stackInfo(split.left, selected);
+                const right = self.stackInfo(split.right, selected);
+                break :result .{ .count = left.count + right.count, .matches = left.matches + right.matches };
+            },
+        };
     }
 };
 
@@ -248,6 +264,8 @@ pub const Node = union(enum) {
         ratio: f32,
         left: u32,
         right: u32,
+        stacked: bool = false,
+        stack_selected: ?u64 = null,
     },
 };
 
@@ -460,6 +478,34 @@ pub fn list(dir: std.Io.Dir, io: std.Io, alloc: Allocator) ![]Entry {
         }
     }.less);
     return entries.toOwnedSlice(alloc);
+}
+
+test "session stacked panes round trip and reject invalid membership" {
+    const t = std.testing;
+    var nodes = [_]Node{
+        .{ .split = .{ .layout = .vertical, .ratio = 0.5, .left = 1, .right = 2, .stacked = true, .stack_selected = 2 } },
+        .{ .leaf = .{ .id = 1, .snapshot = 123 } },
+        .{ .split = .{ .layout = .vertical, .ratio = 0.5, .left = 3, .right = 4 } },
+        .{ .leaf = .{ .id = 2, .working_directory = "/tmp" } },
+        .{ .leaf = .{ .id = 3 } },
+    };
+    const session: Session = .{ .id = 42, .name = "Stack", .tabs = &.{.{ .nodes = &nodes, .active = 3 }} };
+    const bytes = try serialize(t.allocator, session);
+    defer t.allocator.free(bytes);
+    const restored = try parse(t.allocator, bytes);
+    defer restored.deinit();
+    try t.expectEqualDeep(session, restored.value);
+    nodes[0].split.stack_selected = 999;
+    try t.expectError(error.InvalidTree, session.validate());
+    nodes[0].split.stack_selected = 2;
+    nodes[2].split.stacked = true;
+    try t.expectError(error.InvalidTree, session.validate());
+    nodes[2].split.stacked = false;
+    nodes[0].split.stacked = false;
+    try t.expectError(error.InvalidTree, session.validate());
+    // Older manifests omit stack fields and remain ordinary split layouts.
+    nodes[0].split.stack_selected = null;
+    try session.validate();
 }
 
 test "session manifest round trip and validation" {

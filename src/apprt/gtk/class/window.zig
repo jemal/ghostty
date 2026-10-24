@@ -1241,7 +1241,7 @@ pub const Window = extern struct {
             if (tree.isEmpty() and tab.floatingCount() == 0) continue;
             if (page == priv.tab_view.getSelectedPage()) selected = tabs.items.len;
             const nodes = try alloc.alloc(sessions.Node, tree.nodes.len);
-            for (tree.nodes, nodes) |node, *out| out.* = switch (node) {
+            for (tree.nodes, nodes, 0..) |node, *out, node_index| out.* = switch (node) {
                 .leaf => |surface| .{ .leaf = .{
                     .id = surface.sessionId(),
                     .snapshot = surface.sessionSnapshotId(),
@@ -1257,6 +1257,8 @@ pub const Window = extern struct {
                     .ratio = @floatCast(split.ratio),
                     .left = @intCast(split.left.idx()),
                     .right = @intCast(split.right.idx()),
+                    .stacked = split.stacked,
+                    .stack_selected = if (split.stacked) tree.nodes[tree.selected(@fromBackingInt(@intCast(node_index))).idx()].leaf.sessionId() else null,
                 } },
             };
             const active = if (tab.getSplitTree().getActiveSurface()) |surface| tree.locate(surface) else null;
@@ -1346,7 +1348,10 @@ pub const Window = extern struct {
             var active: ?*Surface = null;
             var it = tree.iterator();
             while (it.next()) |entry| {
-                if (entry.view.sessionId() == saved.nodes[saved.active].leaf.id) active = entry.view;
+                if (entry.view.sessionId() == saved.nodes[saved.active].leaf.id) {
+                    active = entry.view;
+                    tree.select(entry.handle);
+                }
                 if (saved.zoomed) |z| {
                     if (entry.view.sessionId() == saved.nodes[z].leaf.id) tree.zoom(entry.handle);
                 }
@@ -1532,7 +1537,17 @@ pub const Window = extern struct {
                 defer left.deinit();
                 var right = try restoreSessionNode(widget, session_id, nodes, split.right);
                 defer right.deinit();
-                return left.split(alloc, .root, if (split.layout == .horizontal) .right else .down, @floatCast(split.ratio), &right);
+                var result = try left.split(alloc, .root, if (split.layout == .horizontal) .right else .down, @floatCast(split.ratio), &right);
+                if (split.stacked) {
+                    var selected = result.nodes[result.deepest(.left, .root).idx()].leaf;
+                    var it = result.iterator();
+                    while (it.next()) |entry| if (split.stack_selected == entry.view.sessionId()) {
+                        selected = entry.view;
+                        break;
+                    };
+                    result.setStack(.root, selected);
+                }
+                return result;
             },
         }
     }

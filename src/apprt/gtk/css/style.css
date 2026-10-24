@@ -445,6 +445,18 @@ label.resize-overlay {
   transition: border-color 160ms ease, box-shadow 160ms ease;
 }
 
+.pane-stack {
+  margin: 3px;
+  border: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+  border-radius: 8px;
+  background: var(--window-bg-color);
+  color: var(--window-fg-color);
+}
+
+.stack-member:not(.active) .pane-titlebar label {
+  opacity: 0.65;
+}
+
 .decorated-pane.active {
   border-color: color-mix(in srgb, currentColor 24%, transparent);
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);

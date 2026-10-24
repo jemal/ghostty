@@ -605,6 +605,15 @@ pub const Action = union(enum) {
     /// Toggle tiled pane frames and headers for this window (GTK only).
     toggle_pane_decorations,
 
+    /// Add a terminal to the current tiled stack (GTK only).
+    new_stacked_terminal,
+    /// Combine compatible neighboring tiled panes into a stack (GTK only).
+    stack_pane: SplitResizeDirection,
+    /// Extract the selected stack member into a neighboring split (GTK only).
+    unstack_pane: SplitResizeDirection,
+    /// Expand the current stack into ordinary vertical splits (GTK only).
+    unstack_all,
+
     /// Show or hide this tab's floating terminals (GTK only).
     toggle_float,
     /// Hide floating terminals and return to the tiled layout (GTK only).
@@ -1000,6 +1009,8 @@ pub const Action = union(enum) {
     /// Same as activate_key_table, but the key table will only be active
     /// until the first valid keybinding from that table is used (including
     /// any defined `catch_all` bindings).
+    /// Modifier-only events do not trigger catch_all in an active one-shot
+    /// table, so Shift can be pressed before a shifted action key.
     ///
     /// The "once" check is only done if this is the currently active
     /// key table. If another key table is activated later, then this
@@ -1507,6 +1518,10 @@ pub const Action = union(enum) {
             .toggle_tab_overview,
             .toggle_toolbar,
             .toggle_pane_decorations,
+            .new_stacked_terminal,
+            .stack_pane,
+            .unstack_pane,
+            .unstack_all,
             .toggle_float,
             .hide_float,
             .focus_float,
@@ -2803,6 +2818,14 @@ pub const Set = struct {
         return null;
     }
 
+    /// A bare modifier must not consume a one-shot table through catch_all.
+    /// Explicit modifier bindings still count as actions in their own right.
+    pub fn getEventOneShot(self: *const Set, event: KeyEvent) ?Entry {
+        const entry = self.getEvent(event) orelse return null;
+        if (event.key.modifier() and entry.key_ptr.key == .catch_all) return null;
+        return entry;
+    }
+
     /// Remove a binding for a given trigger.
     pub fn remove(self: *Set, alloc: Allocator, t: Trigger) void {
         self.removeExact(alloc, t);
@@ -3484,7 +3507,7 @@ test "parse: action with enum with default" {
 
 test "parse: action rearrange splits" {
     const testing = std.testing;
-    inline for (.{ "move_split", "swap_split" }) |name| {
+    inline for (.{ "move_split", "swap_split", "stack_pane", "unstack_pane" }) |name| {
         inline for (.{ "left", "right", "up", "down" }) |direction| {
             const binding = try parseSingle("ctrl+alt+a=" ++ name ++ ":" ++ direction);
             try testing.expectEqual(
@@ -4513,6 +4536,30 @@ test "set: getEvent codepoint case folding" {
         });
         try testing.expect(action == null);
     }
+}
+
+test "set: one-shot catch_all preserves modifiers for shifted actions" {
+    const t = std.testing;
+    var set: Set = .{};
+    defer set.deinit(t.allocator);
+    try set.parseAndPut(t.allocator, "catch_all=ignore");
+    try set.parseAndPut(t.allocator, "shift+h=unstack_pane:left");
+    inline for (.{ key.Key.shift_left, key.Key.shift_right }) |physical| {
+        const modifier: KeyEvent = .{ .key = physical, .mods = .{ .shift = true } };
+        try t.expect(set.getEvent(modifier) != null);
+        try t.expect(set.getEventOneShot(modifier) == null);
+    }
+    const shifted = set.getEventOneShot(.{
+        .key = .key_h,
+        .mods = .{ .shift = true },
+        .unshifted_codepoint = 'h',
+    }).?.value_ptr.*.leaf.action;
+    try t.expectEqual(Action.SplitResizeDirection.left, shifted.unstack_pane);
+    // Non-modifier mistakes still match catch_all and end the once table.
+    try t.expect(set.getEventOneShot(.{ .key = .key_x, .mods = .{} }) != null);
+    // Intentionally binding a modifier still works.
+    try set.parseAndPut(t.allocator, "shift+shift_left=ignore");
+    try t.expect(set.getEventOneShot(.{ .key = .shift_left, .mods = .{ .shift = true } }) != null);
 }
 
 test "set: getEvent catch_all fallback" {

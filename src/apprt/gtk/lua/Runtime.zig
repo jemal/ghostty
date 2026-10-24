@@ -196,6 +196,7 @@ pub const SurfaceInfo = struct {
 
 pub const OpenTarget = union(enum) {
     split: Direction,
+    stack,
     float,
     tab,
     window,
@@ -733,6 +734,7 @@ fn installApi(self: *Runtime) void {
         .{ "toast", luaToast },
         .{ "log", luaLog },
         .{ "split", luaSplit },
+        .{ "stack", luaStack },
         .{ "float", luaFloat },
         .{ "tab", luaTab },
         .{ "window", luaWindow },
@@ -1078,6 +1080,10 @@ fn luaSplit(L: ?*c.lua_State) callconv(.c) c_int {
     return open(L, .split);
 }
 
+fn luaStack(L: ?*c.lua_State) callconv(.c) c_int {
+    return open(L, .stack);
+}
+
 /// ghostty.tab{ surface?, command?, cwd?, title? } -> true | nil, err
 fn luaTab(L: ?*c.lua_State) callconv(.c) c_int {
     return open(L, .tab);
@@ -1119,6 +1125,7 @@ fn open(L: ?*c.lua_State, comptime kind: std.meta.Tag(OpenTarget)) c_int {
                 return pushError(L, "direction must be left, right, up or down") };
         },
         .float => .float,
+        .stack => .stack,
         .tab => .tab,
         .window => .window,
     };
@@ -1654,6 +1661,37 @@ fn testLoad(self: *Runtime, source: []const u8) !void {
         log.warn("test load failed: {s}", .{popError(L)});
         return error.TestLoadFailed;
     }
+}
+
+test "stacked Lua creation and pane mode bindings" {
+    const t = std.testing;
+    var host: TestHost = .{};
+    const rt = try create(t.allocator, host.host());
+    defer rt.destroy();
+    try testLoad(rt, @embedFile("../pane_mode.lua"));
+    try t.expectEqual(@as(usize, 14), rt.binds.items.len);
+    const entries = try rt.configEntries(t.allocator);
+    defer {
+        for (entries) |entry| t.allocator.free(entry);
+        t.allocator.free(entries);
+    }
+    const Config = @import("../../../config.zig").Config;
+    var cfg = try Config.default(t.allocator);
+    defer cfg.deinit();
+    var it = @import("../../../cli.zig").args.sliceIterator(entries);
+    try cfg.loadIter(t.allocator, &it);
+    try t.expect(cfg._diagnostics.empty());
+    try t.expect(rt.run("pane_mode", 7));
+    try t.expect(std.mem.indexOf(u8, host.lastToast(), "HJKL") != null);
+    try testLoad(rt,
+        \\ghostty.action{ name = "stack", run = function()
+        \\  assert(ghostty.stack{ command = { "cargo", "test" }, cwd = "/src", wait = true })
+        \\end }
+    );
+    try t.expect(rt.run("stack", 7));
+    try t.expectEqual(OpenTarget.stack, host.opened.?.target);
+    try t.expectEqualStrings("cargo", std.mem.sliceTo(&host.opened.?.first_arg, 0));
+    try t.expectEqual(@as(?bool, true), host.opened.?.wait);
 }
 
 test "actions and binds become config entries" {

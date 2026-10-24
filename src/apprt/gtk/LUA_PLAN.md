@@ -86,6 +86,20 @@ end)
 A global clock replaces any window-specific text on its next tick; compose
 clock and event information in one Lua function if both should remain visible.
 
+## Stacked command terminals
+
+`ghostty.stack{ surface?, command?, cwd?, title?, wait? }` adds a terminal after
+the selected member, or creates a stack in an ordinary tile. `surface` defaults
+to `ctx.surface` and must identify a tiled terminal. Command/directory/wait
+semantics match `ghostty.split`; the new member gets focus. Returns `true`, or
+`nil, err`. Maximum 32 members. There is no named-reuse behavior.
+
+`ghostty.invoke` can also run `new_stacked_terminal`, `stack_pane:direction`,
+`unstack_pane:direction` and `unstack_all`. The optional `pane_mode.lua` example
+binds them through a one-shot Alt+P key table and guards against older binaries
+with `if ghostty.stack then`. Controls and persistence are documented in
+[SESSION_RESTORE.md](SESSION_RESTORE.md#stacked-panes-gtk).
+
 ## Floating command terminals
 
 `ghostty.float{ surface?, name?, command?, cwd?, title?, wait? }` opens a terminal

@@ -626,6 +626,9 @@ pub const Surface = extern struct {
         /// focus events.
         focused: bool = true,
 
+        /// Runtime focus order, retained across layout rebuilds and transfers.
+        focus_serial: u64 = 0,
+
         /// Whether the RenderSurface widget is mapped. Some operations like
         /// grabbing focus only work if a widget is mapped.
         mapped: bool = false,
@@ -2375,6 +2378,13 @@ pub const Surface = extern struct {
         return self.private().focused;
     }
 
+    pub fn getFocusSerial(self: *Self) u64 {
+        return self.private().focus_serial;
+    }
+
+    // Shared by surfaces so transferred panes keep comparable focus history.
+    var focus_serial: u64 = 0;
+
     /// Returns true if the GLArea of this surface is mapped.
     pub fn getMapped(self: *Self) bool {
         return self.private().mapped;
@@ -3065,6 +3075,10 @@ pub const Surface = extern struct {
 
     fn updateFocus(self: *Self, focused: bool) void {
         const priv = self.private();
+        if (focused and (!priv.focused or priv.focus_serial == 0)) {
+            focus_serial +|= 1;
+            priv.focus_serial = focus_serial;
+        }
         priv.focused = focused;
 
         const ctx = priv.im_context.as(gtk.IMContext);

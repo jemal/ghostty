@@ -6,6 +6,45 @@ This document records the work completed across the development chats, the curre
 
 ## Current checkpoint
 
+- Stack desktop follow-up on 2026-10-24: the user found that Shift alone exits
+  Alt+P mode. The one-shot table's catch-all matched bare modifiers and consumed
+  the table. Modifier-only catch-all matches are now skipped for the active
+  one-shot table; explicit modifier bindings and ordinary table behavior remain.
+  Keybinding-set regression checks, Zig formatting and the updated GTK
+  ReleaseFast build with system Fontconfig passed. The user confirmed the
+  corrected mode works well on the desktop on 2026-10-24.
+  Whole-stack move/swap is intentional; extracting one
+  member uses Alt+P then Shift+HJKL. No movement behavior was changed here.
+- Tiled stacks and one-shot Alt+P pane mode on 2026-10-24: first implementation
+  supports new members, directional sibling-tile combination/extraction,
+  clickable accordion headers, directional member navigation, whole-stack
+  split/move/swap/resize, selected-pane zoom and saved membership/selection.
+  All terminals retain normal ownership and process/confirmation paths.
+  Native actions and palette entries are available; `ghostty.stack` adds Lua
+  command creation. The user's guarded Home Manager block provides Alt+P then
+  HJKL to combine, Shift+HJKL to extract, N to add, U to unstack all, Escape to
+  cancel, including the Vim table. LuaLS metadata and symlinks are preserved.
+  Session tests passed 19 with the existing Fish skip. Focused stack/Lua tests
+  (including close-selection and allocation-failure regressions), action-parser
+  checks, the GTK ReleaseFast build with system Fontconfig, Zig formatting and
+  CLI configuration validation passed. The user approved the desktop result
+  on 2026-10-24; extended lifecycle/restore testing is not claimed.
+  Installed to `~/.local` with ReleaseFast and system Fontconfig; installed
+  CLI pane-mode configuration validation passed. Running sessions were not
+  restarted. Committed in jj change `rnvumyqp`. Scope and compatibility
+  are in `src/apprt/gtk/STACKED_PANES_PLAN.md`.
+- Tiled-pane directional focus follow-up on 2026-10-24: implemented shared-edge
+  adjacency with overlap and most-recent focus selection, inspired by Zellij.
+  Moving from a lower-right pane to a tall left pane and back now returns to
+  the lower-right pane. Outer-edge wrapping remains, using overlapping panes
+  and the same history rule. Runtime history follows each terminal; session
+  storage, floating-panel navigation and structural move/swap are unchanged.
+  Four standalone focus tests, the GTK ReleaseFast build with system Fontconfig,
+  Zig formatting and whitespace checks passed.
+  Desktop-approved on 2026-10-24 and installed to `~/.local` with ReleaseFast
+  and system Fontconfig. Running sessions were not restarted. Included in jj
+  change `rnvumyqp` with tiled stacks and pane mode.
+  Zellij-style tiled stacks subsequently entered implementation; see above.
 - Floating-panel zoom implementation on 2026-10-24: the existing
   `toggle_split_zoom` binding and **Toggle Pane Zoom** command-palette entry
   expand the selected floating panel to the tab's content area and restore
@@ -596,6 +635,13 @@ Current boundaries:
 
 ## Roadmap: discussed, not yet implemented
 
+Stacked panes were explored on 2026-10-24 after the tiled focus follow-up.
+The user wants both new stack members and combining existing panes, directional
+Up/Down through members, ordinary splits beside the whole stack, and directional
+combine actions without a general picker. The draft is
+`src/apprt/gtk/STACKED_PANES_PLAN.md`; first implementation has passed builds and
+focused tests and is awaiting desktop feedback, as recorded in the checkpoint.
+
 There is no unfinished implementation from the approved picker plan. The following items are proposals; their order is a recommendation rather than an approved commitment.
 
 | Priority | Feature | Intended result |
@@ -751,6 +797,7 @@ upstream; `main` tracks `main@origin`. Never push `folie` to `origin`.
 | `lptzpuoy` | gtk: add per-tab floating terminal panels |
 | `ovytvymr` | gtk: refine pane and session chrome |
 | `klpmyuor` | gtk: add floating panel zoom |
+| `rnvumyqp` | gtk: add tiled pane stacks and focus history |
 
 ## Related implementation documentation
 
@@ -761,6 +808,8 @@ upstream; `main` tracks `main@origin`. Never push `folie` to `origin`.
 - `src/apprt/gtk/PICKER_IPC.md`: request/response schema, endpoint targeting, lifecycle, limits, D-Bus methods, and Nushell usage.
 - `src/apprt/gtk/THEME_PICKER_PLAN.md`: implemented live theme picker and reference plan, appearance isolation, runtime scope, and validation criteria.
 - `src/apprt/gtk/LUA_PLAN.md`: Lua scripting API and implemented phases 1 to 4.
+- `src/apprt/gtk/STACKED_PANES_PLAN.md`: tiled stacks, pane mode, compatibility,
+  first-version limits and implementation/validation status.
 - User tooling outside the repository: `~/.config/ghostty/types/ghostty.lua` (LuaLS `---@meta` types for the API), `.luarc.json` and `stylua.toml` (2 spaces, double quotes, 100 columns, `call_parentheses = "NoSingleTable"`, one-line conditionals allowed). Keep the types file in step with the API.
 - `~/dev/rust-terminal-idea.md`: notes for a possible Rust terminal on libghostty-vt (idea only; this fork has priority).
 - `test/gtk-picker.py`: portable isolated GTK picker integration checks.

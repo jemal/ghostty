@@ -270,6 +270,21 @@ windows use the configured value. Showing a toolbar respects the existing
 headerbar and tab visibility options. Both top and bottom toolbars are covered;
 window-manager decorations are controlled separately. This feature is GTK only.
 
+## Focusing panes with the keyboard
+
+GTK directional `goto_split` navigation chooses panes sharing the requested
+edge and overlapping its span. When several panes qualify, it returns to the
+most recently focused one. For example, with one tall pane on the left and
+two panes on the right, moving left from the lower-right pane and then right
+returns to that lower-right pane. Keyboard and mouse focus both update history.
+
+Directional navigation still wraps at outer edges, selecting an overlapping
+pane on the opposite edge with the same focus-history rule. Equal or absent
+history uses stable tree order. History is transient, follows live terminals
+through rearrangement and tab transfers, and is not saved in sessions.
+Next/previous traversal, zoom policy, pane movement/swapping and floating-panel
+focus retain their existing behavior.
+
 ## Moving panes with the keyboard
 
 GTK supports `move_split:left|right|up|down` and
@@ -300,6 +315,47 @@ Rearranged layouts are included in normal session saves.
 
 The old personal fork's `move_split` exchanged panes; use `swap_split` for
 that behavior here.
+
+## Stacked panes (GTK)
+
+A tiled stack has one expanded terminal and a title row for every member.
+Click a row to expand it. Existing Up/Down pane-focus actions step through
+members and then navigate outside at the ends. Left/Right leaves the stack;
+horizontal entry remembers its selection and vertical entry selects the near
+end. Outer-edge wrapping follows ordinary tiled navigation.
+
+The command palette and binding actions provide:
+
+- `new_stacked_terminal`: add after the selected member, or create a stack.
+- `stack_pane:left|right|up|down`: combine compatible sibling tiles/stacks.
+- `unstack_pane:left|right|up|down`: extract the selected member beside its stack.
+- `unstack_all`: replace the stack with equal-height vertical splits.
+
+Ordinary splits, resize and move/swap treat the stack as one tile. Zoom shows
+the selected terminal alone and returns to the stack. Combining/extracting
+preserves running processes. Closing uses normal confirmation, selects the
+next member (previous at the end), and dissolves a one-member stack. Closing a
+background member preserves current focus. Headers remain available when
+optional pane decorations are disabled. Maximum 32 members; undersized groups
+scroll while retaining a minimum expanded-terminal area.
+
+The user's guarded Lua configuration enables Alt+P as a one-shot pane mode in
+normal and Vim key tables: HJKL combines, Shift+HJKL extracts, N adds a terminal,
+U unstacks all, Escape cancels. Unrecognized non-modifier keys cancel and are
+consumed; pressing Shift, Ctrl, Alt or Super alone keeps the mode active.
+A toast displays the keys. These are personal bindings, not repository defaults;
+the reusable example is `pane_mode.lua` in this directory.
+
+Session saves retain membership, order, expanded selection and each member's
+ordinary state, snapshots and relaunch records. Restored hidden members start
+lazily on first expansion. Existing hidden terminals continue running without
+being resized to a single row. Sessions still restore fresh shells rather
+than live processes. Older fork readers ignore stack fields and render the
+underlying binary splits; saving there loses stack grouping.
+
+Nested layouts inside stack members, floating stacks, arbitrary non-sibling
+combination and automatic stacking during resize are deferred. See
+[STACKED_PANES_PLAN.md](STACKED_PANES_PLAN.md) for design and validation status.
 
 ## Floating terminals (GTK)
 

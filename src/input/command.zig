@@ -564,6 +564,32 @@ fn actionCommands(action: Action.Key) []const Command {
             .description = i18n.N_("Focus and raise the previous floating terminal."),
         }},
 
+        .new_stacked_terminal => comptime &.{.{
+            .action = .new_stacked_terminal,
+            .title = i18n.N_("New Stacked Terminal"),
+            .description = i18n.N_("Add a terminal to the current tiled stack (GTK only)."),
+        }},
+
+        .unstack_all => comptime &.{.{
+            .action = .unstack_all,
+            .title = i18n.N_("Unstack All"),
+            .description = i18n.N_("Turn this stack into vertical splits (GTK only)."),
+        }},
+
+        .stack_pane => comptime &.{
+            .{ .action = .{ .stack_pane = .left }, .title = i18n.N_("Stack with Pane: Left"), .description = i18n.N_("Rearrange tiled stack members (GTK only).") },
+            .{ .action = .{ .stack_pane = .right }, .title = i18n.N_("Stack with Pane: Right"), .description = i18n.N_("Rearrange tiled stack members (GTK only).") },
+            .{ .action = .{ .stack_pane = .up }, .title = i18n.N_("Stack with Pane: Up"), .description = i18n.N_("Rearrange tiled stack members (GTK only).") },
+            .{ .action = .{ .stack_pane = .down }, .title = i18n.N_("Stack with Pane: Down"), .description = i18n.N_("Rearrange tiled stack members (GTK only).") },
+        },
+
+        .unstack_pane => comptime &.{
+            .{ .action = .{ .unstack_pane = .left }, .title = i18n.N_("Unstack Pane: Left"), .description = i18n.N_("Rearrange tiled stack members (GTK only).") },
+            .{ .action = .{ .unstack_pane = .right }, .title = i18n.N_("Unstack Pane: Right"), .description = i18n.N_("Rearrange tiled stack members (GTK only).") },
+            .{ .action = .{ .unstack_pane = .up }, .title = i18n.N_("Unstack Pane: Up"), .description = i18n.N_("Rearrange tiled stack members (GTK only).") },
+            .{ .action = .{ .unstack_pane = .down }, .title = i18n.N_("Unstack Pane: Down"), .description = i18n.N_("Rearrange tiled stack members (GTK only).") },
+        },
+
         .toggle_pane_decorations => comptime &.{.{
             .action = .toggle_pane_decorations,
             .title = i18n.N_("Toggle Pane Decorations"),

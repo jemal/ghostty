@@ -18,6 +18,7 @@ const CloseConfirmationDialog = @import("close_confirmation_dialog.zig").CloseCo
 const Surface = @import("surface.zig").Surface;
 const SurfaceScrolledWindow = @import("surface_scrolled_window.zig").SurfaceScrolledWindow;
 const Overrides = @import("Overrides.zig");
+const pane_focus = @import("../pane_focus.zig");
 
 const log = std.log.scoped(.gtk_ghostty_split_tree);
 
@@ -215,7 +216,26 @@ pub const SplitTree = extern struct {
         parent_: ?*Surface,
         overrides: Overrides,
     ) Allocator.Error!void {
+        return self.newSplitImpl(direction, parent_, overrides, false);
+    }
+
+    pub fn newStack(self: *Self, parent: *Surface, overrides: Overrides) Allocator.Error!void {
+        return self.newSplitImpl(.down, parent, overrides, true);
+    }
+
+    fn newSplitImpl(
+        self: *Self,
+        direction: Surface.Tree.Split.Direction,
+        parent_: ?*Surface,
+        overrides: Overrides,
+        stacked: bool,
+    ) Allocator.Error!void {
         const alloc = Application.default().allocator();
+        if (stacked) if (self.getTree()) |tree| {
+            if (parent_) |p| if (tree.locate(p)) |h| {
+                if (tree.leafCount(tree.tile(h)) >= 32) return error.OutOfMemory;
+            };
+        };
 
         // Create our new surface.
         const surface: *Surface = .new(.{
@@ -268,15 +288,20 @@ pub const SplitTree = extern struct {
             break :handle self.getActiveSurfaceHandle() orelse .root;
         };
 
+        const at = if (stacked) handle else old_tree.tile(handle);
         // Create our split!
         var new_tree = try old_tree.split(
             alloc,
-            handle,
+            at,
             direction,
             0.5, // Always split equally for new splits
             &single_tree,
         );
         defer new_tree.deinit();
+        if (stacked) {
+            const old_root = old_tree.tile(handle);
+            new_tree.setStack(if (old_root == handle) handle else old_root, surface);
+        }
         log.debug(
             "new split at={} direction={} old_tree={f} new_tree={f}",
             .{ handle, direction, old_tree, &new_tree },
@@ -322,7 +347,7 @@ pub const SplitTree = extern struct {
 
         var new_tree = try old_tree.resize(
             Application.default().allocator(),
-            active,
+            old_tree.tile(active),
             layout,
             @floatCast(ratio),
         );
@@ -336,11 +361,10 @@ pub const SplitTree = extern struct {
     pub fn goto(self: *Self, to: Surface.Tree.Goto) bool {
         const tree = self.getTree() orelse return false;
         const active = self.getActiveSurfaceHandle() orelse return false;
-        const target = if (tree.goto(
-            Application.default().allocator(),
-            active,
-            to,
-        )) |handle_|
+        const target = if (switch (to) {
+            .spatial => |direction| self.focusTarget(tree, active, direction),
+            else => tree.goto(Application.default().allocator(), active, to),
+        }) |handle_|
             handle_ orelse return false
         else |err| switch (err) {
             // Nothing we can do in this scenario. This is highly unlikely
@@ -354,7 +378,7 @@ pub const SplitTree = extern struct {
 
         // Get the surface at the target location and grab focus.
         const surface = tree.nodes[target.idx()].leaf;
-        surface.grabFocus();
+        self.setActiveSurface(surface);
 
         // We also need to setup our last_focused to this because if we
         // trigger a tree change like below, the grab focus above never
@@ -388,6 +412,124 @@ pub const SplitTree = extern struct {
         return true;
     }
 
+    /// Keep GTK focus history out of the shared split-tree navigation used
+    /// by other runtimes and by structural move/swap operations.
+    fn focusTarget(
+        self: *Self,
+        tree: *const Surface.Tree,
+        active: Surface.Tree.Node.Handle,
+        direction: Surface.Tree.Spatial.Direction,
+    ) Allocator.Error!?Surface.Tree.Node.Handle {
+        _ = self;
+        const alloc = Application.default().allocator();
+        const root = tree.tile(active);
+        if (root != active and (direction == .up or direction == .down)) {
+            if (try tree.goto(alloc, active, if (direction == .up) .previous else .next)) |next| {
+                if (tree.contains(root, next)) return next;
+            }
+        }
+        var spatial = try tree.spatial(alloc);
+        defer spatial.deinit(alloc);
+        const panes = try alloc.alloc(pane_focus.Pane, tree.nodes.len);
+        defer alloc.free(panes);
+        var count: usize = 0;
+        var from: ?usize = null;
+        var it = tree.iterator();
+        while (it.next()) |entry| {
+            const tile = tree.tile(entry.handle);
+            if (tile != entry.handle and tree.selected(tile) != entry.handle) continue;
+            const slot = spatial.slots[entry.handle.idx()];
+            panes[count] = .{
+                .x = slot.x,
+                .y = slot.y,
+                .width = slot.width,
+                .height = slot.height,
+                .focus_serial = entry.view.getFocusSerial(),
+            };
+            if (tile == root) from = count;
+            count += 1;
+        }
+        const target_index = pane_focus.target(panes[0..count], from orelse return null, switch (direction) {
+            .left => .left,
+            .right => .right,
+            .up => .up,
+            .down => .down,
+        }) orelse return null;
+        it = tree.iterator();
+        var index: usize = 0;
+        while (it.next()) |entry| {
+            const tile = tree.tile(entry.handle);
+            if (tile != entry.handle and tree.selected(tile) != entry.handle) {
+                continue;
+            }
+            if (index == target_index) return if (tile != entry.handle and (direction == .up or direction == .down))
+                tree.deepest(if (direction == .down) .left else .right, tile)
+            else
+                entry.handle;
+            index += 1;
+        }
+        unreachable;
+    }
+
+    pub fn stackAction(self: *Self, source: *Surface, action: @import("../../../input/Binding.zig").Action) Allocator.Error!bool {
+        const alloc = Application.default().allocator();
+        const tree = self.getTree() orelse return false;
+        const from = tree.locate(source) orelse return false;
+        const root = tree.tile(from);
+        switch (action) {
+            .new_stacked_terminal => {
+                if (tree.leafCount(root) >= 32) return false;
+                try self.newStack(source, .none);
+            },
+            .stack_pane => |value| {
+                const direction: Surface.Tree.Split.Direction = switch (value) {
+                    .left => .left,
+                    .right => .right,
+                    .up => .up,
+                    .down => .down,
+                };
+                var next = try tree.clone(alloc);
+                defer next.deinit();
+                if (!next.stackWith(from, direction)) return false;
+                self.setTree(&next);
+                self.private().last_focused.set(source);
+            },
+            .unstack_pane => |value| {
+                const direction: Surface.Tree.Split.Direction = switch (value) {
+                    .left => .left,
+                    .right => .right,
+                    .up => .up,
+                    .down => .down,
+                };
+                if (root == from) return false;
+                const next_handle = (try tree.goto(alloc, from, .next)) orelse from;
+                const anchor_handle = if (next_handle != from and tree.contains(root, next_handle)) next_handle else (try tree.goto(alloc, from, .previous)) orelse return false;
+                const anchor = tree.nodes[anchor_handle.idx()].leaf;
+                var leaf = try Surface.Tree.init(alloc, source);
+                defer leaf.deinit();
+                var remaining = try tree.remove(alloc, from);
+                defer remaining.deinit();
+                const anchor_new = remaining.locate(anchor).?;
+                remaining.select(anchor_new);
+                var next = try remaining.split(alloc, remaining.tile(anchor_new), direction, 0.5, &leaf);
+                defer next.deinit();
+                self.setTree(&next);
+                self.private().last_focused.set(source);
+            },
+            .unstack_all => {
+                if (root == from) return false;
+                var next = try tree.clone(alloc);
+                defer next.deinit();
+                next.unstack(root);
+                next.zoomed = null;
+                self.setTree(&next);
+                self.private().last_focused.set(source);
+            },
+            else => return false,
+        }
+        return true;
+    }
+
     /// Rearrange a pane with its spatial neighbor without wrapping. Reuse the
     /// drag operation for movement so keyboard and pointer placement agree.
     pub fn rearrange(
@@ -398,21 +540,30 @@ pub const SplitTree = extern struct {
     ) Allocator.Error!bool {
         const alloc = Application.default().allocator();
         const tree = self.getTree() orelse return false;
-        const from = tree.locate(source) orelse return false;
-        const to = try tree.neighbor(alloc, from, switch (direction) {
+        const from = tree.tile(tree.locate(source) orelse return false);
+        const neighbor = try tree.neighbor(alloc, from, switch (direction) {
             .left => .left,
             .right => .right,
             .up => .up,
             .down => .down,
         }) orelse return false;
+        const to = tree.tile(neighbor);
+        if (from == to) return false;
 
         if (swap) {
-            var swapped = try tree.swapLeaves(alloc, from, to);
+            var swapped = try tree.swapSubtrees(alloc, from, to);
             defer swapped.deinit();
             swapped.zoomed = null;
             self.setTree(&swapped);
         } else {
-            try self.moveSplit(source, tree.nodes[to.idx()].leaf, direction);
+            var branch = try tree.subtree(alloc, from);
+            defer branch.deinit();
+            const anchor = tree.nodes[tree.deepest(.left, to).idx()].leaf;
+            var remaining = try tree.remove(alloc, from);
+            defer remaining.deinit();
+            var next = try remaining.split(alloc, remaining.tile(remaining.locate(anchor).?), direction, 0.5, &branch);
+            defer next.deinit();
+            self.setTree(&next);
         }
 
         // Rebuilding reparents the widgets; restore focus to the same pane.
@@ -428,14 +579,16 @@ pub const SplitTree = extern struct {
         target: *Surface,
         dir: Surface.Tree.Split.Direction,
     ) Allocator.Error!void {
+        if (source == target) return;
         const alloc = Application.default().allocator();
         const target_tree = self.getTree() orelse return;
 
         // This really shouldn't fail, but just in case
-        const target_handle = target_tree.locate(target) orelse {
+        const target_leaf = target_tree.locate(target) orelse {
             log.warn("target is not placed in a split tree", .{});
             return;
         };
+        const target_handle = target_tree.tile(target_leaf);
 
         // Try to find the source within the current tree.
         // If it exists, then it's a local move; otherwise the logic gets more
@@ -566,6 +719,13 @@ pub const SplitTree = extern struct {
     /// Set focus before a rebuilt widget tree has been mapped.
     pub fn setActiveSurface(self: *Self, surface: *Surface) void {
         self.private().last_focused.set(surface);
+        if (self.getTree()) |tree| if (tree.locate(surface)) |handle| {
+            const root = tree.tile(handle);
+            if (root != handle and tree.selected(root) != handle) {
+                tree.select(handle);
+                self.as(gobject.Object).notifyByPspec(properties.tree.impl.param_spec);
+            }
+        };
         surface.grabFocus();
     }
 
@@ -573,7 +733,8 @@ pub const SplitTree = extern struct {
         const tree = self.getTree() orelse return null;
         var it = tree.iterator();
         while (it.next()) |entry| {
-            if (entry.view.getFocused()) return entry.handle;
+            const tile = tree.tile(entry.handle);
+            if (entry.view.getFocused() and (tile == entry.handle or tree.selected(tile) == entry.handle)) return entry.handle;
         }
 
         // If none are currently focused, the most previously focused
@@ -806,7 +967,7 @@ pub const SplitTree = extern struct {
         surface: *Surface,
         self: *Self,
     ) callconv(.c) void {
-        const core = surface.core() orelse return;
+        const core = surface.core();
 
         // Reset our pending close state
         const priv = self.private();
@@ -818,7 +979,7 @@ pub const SplitTree = extern struct {
         priv.pending_close = tree.locate(surface) orelse return;
 
         // If we don't need to confirm then just close immediately.
-        if (!core.needsConfirmQuit()) {
+        if (core == null or !core.?.needsConfirmQuit()) {
             closeConfirmationClose(
                 null,
                 self,
@@ -864,6 +1025,15 @@ pub const SplitTree = extern struct {
         const old_tree = self.getTree() orelse return;
         const next_focus: ?*Surface = next_focus: {
             const alloc = Application.default().allocator();
+            if (self.getActiveSurfaceHandle()) |active| {
+                if (active != handle) break :next_focus old_tree.nodes[active.idx()].leaf;
+            }
+            const root = old_tree.tile(handle);
+            if (root != handle) {
+                if (try old_tree.goto(alloc, handle, .next)) |next| {
+                    if (old_tree.contains(root, next)) break :next_focus old_tree.nodes[next.idx()].leaf;
+                }
+            }
             const next_handle: Surface.Tree.Node.Handle =
                 (old_tree.goto(alloc, handle, .previous) catch null) orelse
                 (old_tree.goto(alloc, handle, .next) catch null) orelse
@@ -882,6 +1052,7 @@ pub const SplitTree = extern struct {
             handle,
         );
         defer new_tree.deinit();
+        if (next_focus) |v| if (new_tree.locate(v)) |h| new_tree.select(h);
         self.setTree(&new_tree);
 
         // Grab focus. We have to set this on the "last focused" because our
@@ -1073,24 +1244,9 @@ pub const SplitTree = extern struct {
         current: Surface.Tree.Node.Handle,
     ) BuildTreeResult {
         return switch (tree.nodes[current.idx()]) {
-            .leaf => |v| leaf: {
-                const window = ext.getAncestor(
-                    SurfaceScrolledWindow,
-                    v.as(gtk.Widget),
-                ) orelse {
-                    // The surface isn't in a window already so we don't
-                    // have to worry about reuse.
-                    break :leaf .initNew(gobject.ext.newInstance(
-                        SurfaceScrolledWindow,
-                        .{ .surface = v },
-                    ).as(gtk.Widget));
-                };
-
-                // Keep this widget alive while we detach it from the
-                // old tree and adopt it into the new one.
-                break :leaf .initReused(window.as(gtk.Widget));
-            },
+            .leaf => |v| buildSurface(v, false, false),
             .split => |s| split: {
+                if (s.stacked) break :split self.buildStack(tree, current);
                 const left = self.buildTree(tree, s.left);
                 defer left.deinit();
                 const right = self.buildTree(tree, s.right);
@@ -1106,6 +1262,44 @@ pub const SplitTree = extern struct {
         };
     }
 
+    fn buildSurface(surface: *Surface, stacked: bool, collapsed: bool) BuildTreeResult {
+        if (ext.getAncestor(SurfaceScrolledWindow, surface.as(gtk.Widget))) |wrapper| {
+            // Detach before changing visibility, so a collapsed terminal is
+            // never briefly remapped through the old, still-visible tree.
+            const built = BuildTreeResult.initReused(wrapper.as(gtk.Widget));
+            wrapper.setStacked(stacked, collapsed);
+            return built;
+        }
+        const wrapper = gobject.ext.newInstance(SurfaceScrolledWindow, .{ .surface = surface });
+        wrapper.setStacked(stacked, collapsed);
+        return .initNew(wrapper.as(gtk.Widget));
+    }
+
+    fn buildStack(self: *Self, tree: *const Surface.Tree, root: Surface.Tree.Node.Handle) BuildTreeResult {
+        const box = gtk.Box.new(.vertical, 0);
+        box.as(gtk.Widget).setVexpand(1);
+        self.appendStackMembers(tree, root, tree.selected(root), box);
+        const scroll = gtk.ScrolledWindow.new();
+        scroll.setPolicy(.never, .automatic);
+        scroll.setChild(box.as(gtk.Widget));
+        scroll.as(gtk.Widget).addCssClass("pane-stack");
+        return .initNew(scroll.as(gtk.Widget));
+    }
+
+    fn appendStackMembers(self: *Self, tree: *const Surface.Tree, root: Surface.Tree.Node.Handle, selected: Surface.Tree.Node.Handle, box: *gtk.Box) void {
+        switch (tree.nodes[root.idx()]) {
+            .split => |s| {
+                self.appendStackMembers(tree, s.left, selected, box);
+                self.appendStackMembers(tree, s.right, selected, box);
+            },
+            .leaf => |surface| {
+                const built = buildSurface(surface, true, root != selected);
+                defer built.deinit();
+                box.append(built.widget);
+            },
+        }
+    }
+
     /// Detach a split widget from its current parent.
     ///
     /// We intentionally use parent-specific child APIs when possible
@@ -1115,6 +1309,11 @@ pub const SplitTree = extern struct {
     /// that keeps container state and notifications in sync.
     fn detachWidget(widget: *gtk.Widget) void {
         const parent = widget.getParent() orelse return;
+
+        if (gobject.ext.cast(gtk.Box, parent)) |box| {
+            box.remove(widget);
+            return;
+        }
 
         // Surface will be in a paned when it is split.
         if (gobject.ext.cast(gtk.Paned, parent)) |paned| {

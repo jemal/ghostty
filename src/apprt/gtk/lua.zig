@@ -478,6 +478,14 @@ fn open(
     };
 
     switch (target) {
+        .stack => {
+            const surface = (parent orelse return error.NoSurface).rt_surface.surface;
+            const tree = ext.getAncestor(SplitTree, surface.as(gtk.Widget)) orelse return error.OpenFailed;
+            const model = tree.getTree() orelse return error.OpenFailed;
+            const handle = model.locate(surface) orelse return error.OpenFailed;
+            if (model.leafCount(model.tile(handle)) >= 32) return error.OpenFailed;
+            try tree.newStack(surface, overrides);
+        },
         .float => {
             const surface = (parent orelse return error.NoSurface).rt_surface.surface;
             const tab = ext.getAncestor(@import("class/tab.zig").Tab, surface.as(gtk.Widget)) orelse return error.OpenFailed;

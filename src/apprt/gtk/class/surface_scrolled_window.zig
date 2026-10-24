@@ -64,6 +64,8 @@ pub const SurfaceScrolledWindow = extern struct {
         pane_frame: *gtk.Box,
         pane_header: *gtk.Box,
         pane_title: *gtk.Label,
+        stacked: bool = false,
+        collapsed: bool = false,
         surface_handlers: [3]c_ulong = .{ 0, 0, 0 },
         pub var offset: c_int = 0;
     };
@@ -141,6 +143,16 @@ pub const SurfaceScrolledWindow = extern struct {
         return self.private().surface;
     }
 
+    pub fn setStacked(self: *Self, stacked: bool, collapsed: bool) void {
+        const priv = self.private();
+        priv.stacked = stacked;
+        priv.collapsed = stacked and collapsed;
+        priv.scrolled_window.as(gtk.Widget).setVisible(@intFromBool(!priv.collapsed));
+        self.as(gtk.Widget).setVexpand(@intFromBool(stacked and !collapsed));
+        self.as(gtk.Widget).setSizeRequest(-1, if (stacked and !collapsed) 120 else -1);
+        self.refreshDecoration();
+    }
+
     pub fn setSurface(self: *Self, surface_: ?*Surface) void {
         const priv = self.private();
 
@@ -174,8 +186,9 @@ pub const SurfaceScrolledWindow = extern struct {
         else
             false;
         const frame = priv.pane_frame.as(gtk.Widget);
-        if (enabled) frame.addCssClass("decorated-pane") else frame.removeCssClass("decorated-pane");
-        priv.pane_header.as(gtk.Widget).setVisible(@intFromBool(enabled));
+        if (enabled and !priv.stacked) frame.addCssClass("decorated-pane") else frame.removeCssClass("decorated-pane");
+        if (priv.stacked) frame.addCssClass("stack-member") else frame.removeCssClass("stack-member");
+        priv.pane_header.as(gtk.Widget).setVisible(@intFromBool(enabled or priv.stacked));
         if (priv.surface) |surface| {
             const title = surface.getEffectiveTitle() orelse "Terminal";
             priv.pane_title.setLabel(title);
@@ -193,7 +206,13 @@ pub const SurfaceScrolledWindow = extern struct {
     }
 
     fn focusPane(_: *gtk.Button, self: *Self) callconv(.c) void {
-        if (self.private().surface) |surface| surface.grabFocus();
+        if (self.private().surface) |surface| {
+            const ext = @import("../ext.zig");
+            if (ext.getAncestor(@import("split_tree.zig").SplitTree, self.as(gtk.Widget))) |tree|
+                tree.setActiveSurface(surface)
+            else
+                surface.grabFocus();
+        }
     }
 
     fn closePane(_: *gtk.Button, self: *Self) callconv(.c) void {

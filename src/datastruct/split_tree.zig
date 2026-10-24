@@ -104,6 +104,11 @@ pub fn SplitTree(comptime V: type) type {
             left: Node.Handle,
             right: Node.Handle,
 
+            /// Accordion presentation of this subtree. Leaves retain normal
+            /// ownership; selection borrows a leaf owned by this subtree.
+            stacked: bool = false,
+            stack_selected: ?*View = null,
+
             pub const Layout = enum { horizontal, vertical };
             pub const Direction = enum { left, right, down, up };
         };
@@ -193,6 +198,122 @@ pub fn SplitTree(comptime V: type) type {
                 }
             }
             return null;
+        }
+
+        pub fn contains(self: *const Self, root: Node.Handle, handle: Node.Handle) bool {
+            if (root == handle) return true;
+            return switch (self.nodes[root.idx()]) {
+                .leaf => false,
+                .split => |s| self.contains(s.left, handle) or self.contains(s.right, handle),
+            };
+        }
+
+        /// The outermost stack containing a node, or the node itself.
+        pub fn tile(self: *const Self, handle: Node.Handle) Node.Handle {
+            return self.stackAncestor(.root, handle) orelse handle;
+        }
+
+        fn stackAncestor(self: *const Self, root: Node.Handle, handle: Node.Handle) ?Node.Handle {
+            if (!self.contains(root, handle)) return null;
+            return switch (self.nodes[root.idx()]) {
+                .leaf => null,
+                .split => |s| if (s.stacked) root else self.stackAncestor(s.left, handle) orelse self.stackAncestor(s.right, handle),
+            };
+        }
+
+        pub fn selected(self: *const Self, root: Node.Handle) Node.Handle {
+            const node = self.nodes[root.idx()];
+            if (node == .split) if (node.split.stack_selected) |view| {
+                if (self.locate(view)) |handle| if (self.contains(root, handle)) return handle;
+            };
+            return self.deepest(.left, root);
+        }
+
+        pub fn select(self: *Self, handle: Node.Handle) void {
+            const root = self.tile(handle);
+            if (root != handle) @constCast(&self.nodes[root.idx()].split).stack_selected = self.nodes[handle.idx()].leaf;
+        }
+
+        /// Parent in the binary ownership tree.
+        pub fn parent(self: *const Self, handle: Node.Handle) ?Node.Handle {
+            for (self.nodes, 0..) |node, i| if (node == .split) {
+                if (node.split.left == handle or node.split.right == handle)
+                    return @fromBackingInt(@intCast(i));
+            };
+            return null;
+        }
+
+        pub fn setStack(self: *Self, root: Node.Handle, view: *View) void {
+            const s = &@constCast(self.nodes)[root.idx()].split;
+            self.clearStack(s.left);
+            self.clearStack(s.right);
+            s.stacked = true;
+            s.stack_selected = view;
+        }
+
+        /// Combine compatible sibling tiles without changing unrelated panes.
+        pub fn stackWith(self: *Self, handle: Node.Handle, direction: Split.Direction) bool {
+            const root = self.tile(handle);
+            const owner = self.parent(root) orelse return false;
+            const s = self.nodes[owner.idx()].split;
+            const sibling = if (s.left == root) s.right else s.left;
+            const expected: Split.Direction = if (s.layout == .horizontal)
+                (if (s.left == root) .right else .left)
+            else
+                (if (s.left == root) .down else .up);
+            if (direction != expected) return false;
+            if (self.nodes[sibling.idx()] == .split and !self.nodes[sibling.idx()].split.stacked) return false;
+            if (self.leafCount(owner) > 32) return false;
+            self.setStack(owner, self.nodes[handle.idx()].leaf);
+            self.zoomed = null;
+            return true;
+        }
+
+        pub fn clearStack(self: *Self, root: Node.Handle) void {
+            switch (@constCast(self.nodes)[root.idx()]) {
+                .leaf => {},
+                .split => |*s| {
+                    s.stacked = false;
+                    s.stack_selected = null;
+                    self.clearStack(s.left);
+                    self.clearStack(s.right);
+                },
+            }
+        }
+
+        pub fn leafCount(self: *const Self, root: Node.Handle) usize {
+            return switch (self.nodes[root.idx()]) {
+                .leaf => 1,
+                .split => |s| self.leafCount(s.left) + self.leafCount(s.right),
+            };
+        }
+
+        /// Turn an accordion into equal-height ordinary tiles in member order.
+        pub fn unstack(self: *Self, root: Node.Handle) void {
+            switch (@constCast(self.nodes)[root.idx()]) {
+                .leaf => {},
+                .split => |*s| {
+                    s.stacked = false;
+                    s.stack_selected = null;
+                    s.layout = .vertical;
+                    s.ratio = @as(f16, @floatFromInt(self.leafCount(s.left))) /
+                        @as(f16, @floatFromInt(self.leafCount(root)));
+                    self.unstack(s.left);
+                    self.unstack(s.right);
+                },
+            }
+        }
+
+        pub fn subtree(self: *const Self, gpa: Allocator, root: Node.Handle) Allocator.Error!Self {
+            var arena = ArenaAllocator.init(gpa);
+            errdefer arena.deinit();
+            const nodes = try arena.allocator().alloc(Node, self.nodes.len);
+            var result: Self = .{ .arena = arena, .nodes = nodes, .zoomed = null };
+            // No node can have this sentinel handle (the maximum is reserved).
+            const count = @constCast(self).removeNode(&result, 0, root, @fromBackingInt(@intCast(std.math.maxInt(Node.Handle.Backing))));
+            result.nodes = nodes[0..count];
+            try refNodes(gpa, nodes[0..count]);
+            return result;
         }
 
         /// An iterator over all the views in the tree.
@@ -298,16 +419,25 @@ pub fn SplitTree(comptime V: type) type {
             return self.nearest(sp, from, direction, sp.slots[from.idx()], 2 * std.math.floatEps(f16));
         }
 
-        /// Exchange two leaves while preserving the geometry. Zoom follows
-        /// the view rather than its previous position. The original is unchanged.
+        /// Exchange two leaves. Zoom follows the view. The original is unchanged.
         pub fn swapLeaves(
             self: *const Self,
             alloc: Allocator,
             a: Node.Handle,
             b: Node.Handle,
         ) Allocator.Error!Self {
-            assert(self.nodes[a.idx()] == .leaf);
-            assert(self.nodes[b.idx()] == .leaf);
+            assert(self.nodes[a.idx()] == .leaf and self.nodes[b.idx()] == .leaf);
+            return self.swapSubtrees(alloc, a, b);
+        }
+
+        /// Exchange disjoint ownership branches without changing their contents.
+        pub fn swapSubtrees(
+            self: *const Self,
+            alloc: Allocator,
+            a: Node.Handle,
+            b: Node.Handle,
+        ) Allocator.Error!Self {
+            assert(a == b or (!self.contains(a, b) and !self.contains(b, a)));
             var result = try self.clone(alloc);
             const nodes = @constCast(result.nodes);
             std.mem.swap(Node, &nodes[a.idx()], &nodes[b.idx()]);
@@ -656,9 +786,25 @@ pub fn SplitTree(comptime V: type) type {
                 at,
             ) != 0);
 
-            // Increase the reference count of all the nodes.
+            for (result.nodes, 0..) |node, i| if (node == .split and node.split.stacked) {
+                const handle: Node.Handle = @fromBackingInt(@intCast(i));
+                if (node.split.stack_selected) |view| if (result.locate(view) == null) {
+                    if (self.locate(view)) |old_selected| {
+                        const old_root = self.tile(old_selected);
+                        const following = self.next(old_selected);
+                        const candidate = if (following != null and self.contains(old_root, following.?)) following else self.previous(old_selected);
+                        if (candidate) |candidate_handle| {
+                            const next_view = self.nodes[candidate_handle.idx()].leaf;
+                            if (result.locate(next_view)) |h| {
+                                if (result.contains(handle, h)) @constCast(&result.nodes[i].split).stack_selected = next_view;
+                            }
+                        }
+                    }
+                };
+                @constCast(&result.nodes[i].split).stack_selected = result.nodes[result.selected(handle).idx()].leaf;
+            };
+            // Retain after resolving selection, so copying views can remap it.
             try refNodes(gpa, nodes);
-
             return result;
         }
 
@@ -699,18 +845,19 @@ pub fn SplitTree(comptime V: type) type {
                     // If we're removing one of the split node sides then
                     // we remove the split node itself as well and only add
                     // the other (non-removed) side.
-                    if (s.left == target) return old.removeNode(
-                        new,
-                        new_offset,
-                        s.right,
-                        target,
-                    );
-                    if (s.right == target) return old.removeNode(
-                        new,
-                        new_offset,
-                        s.left,
-                        target,
-                    );
+                    if (s.left == target or s.right == target) {
+                        const count = old.removeNode(
+                            new,
+                            new_offset,
+                            if (s.left == target) s.right else s.left,
+                            target,
+                        );
+                        if (s.stacked and new_nodes[new_offset] == .split) {
+                            new_nodes[new_offset].split.stacked = true;
+                            new_nodes[new_offset].split.stack_selected = s.stack_selected;
+                        }
+                        return count;
+                    }
 
                     // Neither side is being directly removed, so we traverse.
                     const left = old.removeNode(
@@ -730,6 +877,8 @@ pub fn SplitTree(comptime V: type) type {
                     new_nodes[new_offset] = .{ .split = .{
                         .layout = s.layout,
                         .ratio = s.ratio,
+                        .stacked = s.stacked,
+                        .stack_selected = s.stack_selected,
                         .left = @fromBackingInt(@intCast(new_offset + 1)),
                         .right = @fromBackingInt(@intCast(new_offset + 1 + left)),
                     } };
@@ -796,11 +945,20 @@ pub fn SplitTree(comptime V: type) type {
             for (0..nodes.len) |i| {
                 switch (nodes[i]) {
                     .split => {},
-                    .leaf => |view| nodes[i] = .{ .leaf = try viewRef(view, gpa) },
+                    .leaf => |view| {
+                        const retained = try viewRef(view, gpa);
+                        nodes[i] = .{ .leaf = retained };
+                        // Test views may retain by copying rather than by
+                        // reference counting. Keep borrowed selection valid.
+                        if (retained != view) for (nodes) |*node| {
+                            if (node.* == .split and node.split.stack_selected == view)
+                                node.split.stack_selected = retained;
+                        };
+                    },
                 }
-                reffed = i;
+                reffed = i + 1;
             }
-            assert(reffed == nodes.len - 1);
+            assert(reffed == nodes.len);
         }
 
         /// Equalize this node and all its children, returning a new node with splits
@@ -852,7 +1010,7 @@ pub fn SplitTree(comptime V: type) type {
         ) usize {
             return switch (self.nodes[from.idx()]) {
                 .leaf => acc + 1,
-                .split => |s| if (s.layout == layout)
+                .split => |s| if (s.stacked) acc + 1 else if (s.layout == layout)
                     self.weight(s.left, layout, acc) +
                         self.weight(s.right, layout, acc)
                 else
@@ -1060,6 +1218,13 @@ pub fn SplitTree(comptime V: type) type {
                 .leaf => {},
 
                 .split => |s| {
+                    if (s.stacked) {
+                        slots[s.left.idx()] = slots[current];
+                        slots[s.right.idx()] = slots[current];
+                        self.fillSpatialSlots(slots, s.left);
+                        self.fillSpatialSlots(slots, s.right);
+                        return;
+                    }
                     switch (s.layout) {
                         .horizontal => {
                             slots[s.left.idx()] = .{
@@ -1109,6 +1274,7 @@ pub fn SplitTree(comptime V: type) type {
             return switch (self.nodes[current.idx()]) {
                 .leaf => .{ .width = 1, .height = 1 },
                 .split => |s| split: {
+                    if (s.stacked) break :split .{ .width = 1, .height = 1 };
                     const left = self.dimensions(s.left);
                     const right = self.dimensions(s.right);
                     break :split switch (s.layout) {
@@ -1409,6 +1575,115 @@ pub fn SplitTree(comptime V: type) type {
 }
 
 const TestTree = SplitTree(TestView);
+
+test "SplitTree: stacked copied references survive allocation failures" {
+    try std.testing.checkAllAllocationFailures(std.testing.allocator, struct {
+        fn run(alloc: Allocator) !void {
+            var a: TestView = .{ .label = "A" };
+            var b: TestView = .{ .label = "B" };
+            var ta = try TestTree.init(alloc, &a);
+            defer ta.deinit();
+            var tb = try TestTree.init(alloc, &b);
+            defer tb.deinit();
+            var pair = try ta.split(alloc, .root, .down, 0.5, &tb);
+            defer pair.deinit();
+            const selected = pair.nodes[0].split.right;
+            pair.setStack(.root, pair.nodes[selected.idx()].leaf);
+            var clone = try pair.clone(alloc);
+            defer clone.deinit();
+            try std.testing.expectEqual(selected, clone.selected(.root));
+            try std.testing.expect(clone.nodes[selected.idx()].leaf == clone.nodes[0].split.stack_selected.?);
+            var branch = try clone.subtree(alloc, .root);
+            defer branch.deinit();
+            try std.testing.expectEqualStrings("B", branch.nodes[branch.selected(.root).idx()].leaf.label);
+            var single = try pair.remove(alloc, selected);
+            defer single.deinit();
+            try std.testing.expectEqualStrings("A", single.nodes[0].leaf.label);
+        }
+    }.run, .{});
+}
+
+test "SplitTree: stacked ownership selection removal and geometry" {
+    const t = std.testing;
+    const alloc = t.allocator;
+    const StackView = struct {
+        label: []const u8,
+        pub fn ref(self: *@This()) *@This() {
+            return self;
+        }
+        pub fn unref(_: *@This()) void {}
+        pub fn splitTreeLabel(self: *const @This()) []const u8 {
+            return self.label;
+        }
+    };
+    const StackTree = SplitTree(StackView);
+    var a: StackView = .{ .label = "A" };
+    var b: StackView = .{ .label = "B" };
+    var c: StackView = .{ .label = "C" };
+    var ta = try StackTree.init(alloc, &a);
+    defer ta.deinit();
+    var tb = try StackTree.init(alloc, &b);
+    defer tb.deinit();
+    var tc = try StackTree.init(alloc, &c);
+    defer tc.deinit();
+    var pair = try ta.split(alloc, .root, .down, 0.5, &tb);
+    defer pair.deinit();
+    const hb = pair.locate(&b).?;
+    try t.expect(!pair.stackWith(hb, .left));
+    try t.expect(pair.stackWith(hb, .up));
+    try t.expectEqual(StackTree.Node.Handle.root, pair.tile(hb));
+    try t.expectEqual(hb, pair.selected(.root));
+    var geometry = try pair.spatial(alloc);
+    defer geometry.deinit(alloc);
+    try t.expectEqualDeep(geometry.slots[pair.locate(&a).?.idx()], geometry.slots[hb.idx()]);
+    // An ordinary split beside the group preserves membership and selection.
+    var beside = try pair.split(alloc, .root, .right, 0.5, &tc);
+    defer beside.deinit();
+    const group = beside.tile(beside.locate(&b).?);
+    try t.expect(group != .root);
+    try t.expectEqual(@as(usize, 2), beside.leafCount(group));
+    var copied = try beside.subtree(alloc, group);
+    defer copied.deinit();
+    try t.expectEqual(@as(usize, 2), copied.leafCount(.root));
+    try t.expectEqual(copied.locate(&b).?, copied.selected(.root));
+    var swapped = try beside.swapSubtrees(alloc, group, beside.locate(&c).?);
+    defer swapped.deinit();
+    try t.expectEqual(@as(usize, 2), swapped.leafCount(swapped.tile(swapped.locate(&b).?)));
+    var merged = try beside.clone(alloc);
+    defer merged.deinit();
+    try t.expect(merged.stackWith(merged.locate(&c).?, .left));
+    try t.expectEqual(@as(usize, 3), merged.leafCount(.root));
+    try t.expectEqual(merged.locate(&c).?, merged.selected(.root));
+    try t.expect(!merged.nodes[group.idx()].split.stacked);
+    // Inserting a member then collapsing a branch keeps a stack of two.
+    var triple = try pair.split(alloc, hb, .down, 0.5, &tc);
+    defer triple.deinit();
+    triple.setStack(.root, &b);
+    var removed = try triple.remove(alloc, triple.locate(&a).?);
+    defer removed.deinit();
+    try t.expect(removed.nodes[0].split.stacked);
+    try t.expectEqual(removed.locate(&b).?, removed.selected(.root));
+    var selected_removed = try triple.remove(alloc, triple.locate(&b).?);
+    defer selected_removed.deinit();
+    try t.expectEqual(selected_removed.locate(&c).?, selected_removed.selected(.root));
+    var extracted = try selected_removed.split(alloc, .root, .left, 0.5, &tb);
+    defer extracted.deinit();
+    try t.expectEqual(extracted.locate(&b).?, extracted.tile(extracted.locate(&b).?));
+    try t.expectEqual(@as(usize, 2), extracted.leafCount(extracted.tile(extracted.locate(&c).?)));
+    var single = try pair.remove(alloc, hb);
+    defer single.deinit();
+    try t.expect(single.nodes[0] == .leaf);
+    // Flattening preserves live leaf identity and yields ordinary vertical tiles.
+    var flat = try triple.clone(alloc);
+    defer flat.deinit();
+    flat.unstack(.root);
+    for (flat.nodes) |node| if (node == .split) {
+        try t.expect(!node.split.stacked);
+        try t.expectEqual(StackTree.Split.Layout.vertical, node.split.layout);
+    };
+    try t.expectEqual(@as(usize, 3), flat.leafCount(.root));
+    try t.expect(triple.nodes[0].split.stacked);
+}
 
 const TestView = struct {
     const Self = @This();

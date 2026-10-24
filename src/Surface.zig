@@ -3080,7 +3080,11 @@ fn maybeHandleBinding(
             for (0..table_items.len) |i| {
                 const rev_i: usize = table_items.len - 1 - i;
                 const table = table_items[rev_i];
-                if (table.set.getEvent(event)) |v| {
+                const binding = if (table.once and i == 0)
+                    table.set.getEventOneShot(event)
+                else
+                    table.set.getEvent(event);
+                if (binding) |v| {
                     // If this is a one-shot activation AND its the currently
                     // active table, then we deactivate it after this.
                     // Note: we may want to change the semantics here to
@@ -5672,6 +5676,12 @@ pub fn performBindingAction(self: *Surface, action: input.Binding.Action) !bool 
         .toggle_pane_decorations => {
             if (comptime @hasDecl(apprt.Surface, "togglePaneDecorations"))
                 return self.rt_surface.togglePaneDecorations();
+            return false;
+        },
+
+        .new_stacked_terminal, .stack_pane, .unstack_pane, .unstack_all => {
+            if (comptime @hasDecl(apprt.Surface, "stackAction"))
+                return self.rt_surface.stackAction(action);
             return false;
         },
 

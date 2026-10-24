@@ -73,6 +73,17 @@ pub fn floatingAction(self: *Self, action: @import("../../input/Binding.zig").Ac
     return tab.floatingAction(action);
 }
 
+pub fn stackAction(self: *Self, action: @import("../../input/Binding.zig").Action) bool {
+    const tree = @import("ext.zig").getAncestor(
+        @import("class/split_tree.zig").SplitTree,
+        self.surface.as(@import("gtk").Widget),
+    ) orelse return false;
+    return tree.stackAction(self.surface, action) catch |err| {
+        std.log.scoped(.gtk).warn("stack action failed: {}", .{err});
+        return false;
+    };
+}
+
 pub fn toggleToolbar(self: *Self) bool {
     const window = @import("ext.zig").getAncestor(
         @import("class/window.zig").Window,
