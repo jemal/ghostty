@@ -80,6 +80,15 @@ pub const Window = extern struct {
                 .accessor = C.privateStringFieldAccessor("session_name"),
             });
         };
+        /// False until the user saves the session. Unsaved sessions are
+        /// never written to disk.
+        pub const @"session-saved" = struct {
+            pub const name = "session-saved";
+            const impl = gobject.ext.defineProperty(name, Self, bool, .{
+                .default = false,
+                .accessor = gobject.ext.typedAccessor(Self, bool, .{ .getter = isSessionSaved }),
+            });
+        };
         /// The active surface is the focus that should be receiving all
         /// surface-targeted actions. This is usually the focused surface,
         /// but may also not be focused if the user has selected a non-surface
@@ -333,6 +342,7 @@ pub const Window = extern struct {
         session_hash: ?u64 = null,
         archive_on_close: bool = false,
         session_archived: bool = false,
+        session_saved: bool = false,
         toolbar_visible_override: ?bool = null,
 
         theme: ThemePicker.State = .{},
@@ -344,6 +354,7 @@ pub const Window = extern struct {
         tab_view: *adw.TabView,
         toolbar: *adw.ToolbarView,
         toast_overlay: *adw.ToastOverlay,
+        session_label: *gtk.Label,
 
         pub var offset: c_int = 0;
     };
@@ -433,8 +444,8 @@ pub const Window = extern struct {
         self.syncAppearance();
 
         priv.session_id = sessions.newId(global.io());
-        var name_buf: [64]u8 = undefined;
-        self.setSessionName(std.mem.print(&name_buf, "Session {x}", .{priv.session_id & 0xffffff}) catch unreachable);
+        var name_buf: [sessions.max_haiku_name_bytes]u8 = undefined;
+        self.setSessionName(sessions.haikuName(&name_buf, priv.session_id));
 
         // We need to do this so that the title initializes properly,
         // I think because its a dynamic getter.
@@ -1130,6 +1141,7 @@ pub const Window = extern struct {
         // Saved window geometry wins over the first shell's initial size.
         priv.surface_init = true;
         window.setSessionName(manifest.name);
+        window.markSessionSaved();
         window.setTitleOverride(manifest.title);
         window.as(gtk.Window).setDefaultSize(manifest.width, manifest.height);
         if (manifest.maximized) window.as(gtk.Window).maximize() else window.as(gtk.Window).unmaximize();
@@ -1214,6 +1226,25 @@ pub const Window = extern struct {
         return self.private().session_archived;
     }
 
+    pub fn isSessionSaved(self: *Self) bool {
+        return self.private().session_saved;
+    }
+
+    fn markSessionSaved(self: *Self) void {
+        const priv = self.private();
+        priv.session_saved = true;
+        priv.session_label.as(gtk.Widget).removeCssClass("dim-label");
+        self.as(gobject.Object).notifyByPspec(properties.@"session-saved".impl.param_spec);
+    }
+
+    /// Save this window's session from now on, renamed to `name` if it is
+    /// not null. Later changes are saved like in any saved session.
+    pub fn saveSession(self: *Self, name: ?[]const u8) void {
+        if (name) |v| self.setSessionName(v);
+        self.markSessionSaved();
+        Application.default().saveSessions();
+    }
+
     pub fn markSessionArchived(self: *Self) void {
         self.private().session_archived = true;
     }
@@ -1226,15 +1257,18 @@ pub const Window = extern struct {
     }
 
     fn actionNewSession(_: *gio.SimpleAction, _: ?*glib.Variant, _: *Self) callconv(.c) void {
-        createSession();
+        createSession(null);
     }
 
-    pub fn createSession() void {
+    /// Open a new session window. With a name, the session is saved.
+    /// Without one, it is unsaved and keeps the haiku name that every new
+    /// window gets, like any other new window.
+    pub fn createSession(name: ?[]const u8) void {
         if (!Application.default().sessionsEnabled()) return;
         const window = Self.new(Application.default(), .none);
         window.newTab(null, .none);
         Application.default().presentSessionWindow(window);
-        window.promptSessionName();
+        if (name) |v| window.saveSession(v);
     }
 
     fn actionRenameSession(_: *gio.SimpleAction, _: ?*glib.Variant, self: *Self) callconv(.c) void {
@@ -1771,8 +1805,10 @@ pub const Window = extern struct {
         return @intFromBool(style == .tabs and compact != 0);
     }
 
+    /// The width of the session name in the header, in characters. Every
+    /// haiku name (`sessions.max_haiku_name_bytes`) fits without ellipsis.
     fn closureSessionNameWidth(_: *Self, compact: c_int) callconv(.c) c_int {
-        return if (compact != 0) 12 else 20;
+        return if (compact != 0) 15 else 20;
     }
 
     pub fn setTitleOverride(self: *Self, title: ?[]const u8) void {
@@ -2813,6 +2849,7 @@ pub const Window = extern struct {
             // Properties
             gobject.ext.registerProperties(class, &.{
                 properties.@"session-name".impl,
+                properties.@"session-saved".impl,
                 properties.@"session-enabled".impl,
                 properties.@"active-surface".impl,
                 properties.config.impl,
@@ -2836,6 +2873,7 @@ pub const Window = extern struct {
             class.bindTemplateChildPrivate("tab_view", .{});
             class.bindTemplateChildPrivate("toolbar", .{});
             class.bindTemplateChildPrivate("toast_overlay", .{});
+            class.bindTemplateChildPrivate("session_label", .{});
 
             // Template Callbacks
             class.bindTemplateCallback("realize", &windowRealize);

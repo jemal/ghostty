@@ -4,9 +4,27 @@ Enable with `window-save-state = always`. GTK leaves this disabled for
 `default` and `never`. Disabling it retains existing saved sessions.
 
 Each session represents one window's tabs and split trees. The session name
-appears at the start of the tab bar. Clicking it opens the Sessions overlay,
-where you can create, rename, reopen, archive, or delete sessions. Opening a
-session that is already open focuses its window without creating a copy.
+appears at the start of the tab bar, at a fixed width. Clicking it opens the
+Sessions overlay, where you can save, create, rename, reopen, archive, or
+delete sessions. Opening a session that is already open focuses its window
+without creating a copy.
+
+## Saved and unsaved sessions (since 2026-10-23)
+
+Every new window is an **unsaved** session. It gets a random haiku name (an
+adjective and a noun from the session ID, for example `misty-pond`, at most 15
+bytes). The header shows the name dimmed, and the tooltip says that it is
+unsaved. Ghostty never writes an unsaved session to disk: no manifest, no
+snapshots, no entry in the session index.
+
+A session becomes **saved** when you press Alt+S in the Sessions overlay
+(under its current name; rename it with Alt+R), when you create it with
+Alt+N and a typed name, or when you
+open it from the overlay. From then on it is saved like before.
+
+Startup does **not** restore sessions. Every start opens one new unsaved
+window. Open saved sessions from the overlay. Earlier versions restored the
+sessions in `active.json`; that file is still written but not read.
 
 The manifest preserves tab order, custom window/tab/pane titles, split
 orientations and ratios, working directories, active panes, selected tabs,
@@ -16,10 +34,8 @@ Primary-screen output, styles, hyperlinks, images, and scrollback are saved
 in binary snapshots. Shells start afresh; running commands and alternate-screen
 programs are not resumed.
 
-Closed sessions remain available in the Sessions overlay. Startup restores the sessions
-in the last active-session index. Closing the last window retains that
-session for the next activation, including when a hidden quick terminal keeps
-the application running. Quick terminals are not persisted.
+Closed saved sessions remain available in the Sessions overlay. Closing an
+unsaved window discards it. Quick terminals are not persisted.
 
 Click the session name in the tab bar or choose **Sessions…** in the command
 palette to open the searchable floating overlay inside the current window.
@@ -30,21 +46,23 @@ keybind = alt+space=switch_session
 ```
 
 This shortcut is configured in the user's Home Manager source, including the
-Vim key table; no default shortcut is imposed by the fork. Automatic startup
-restoration is unchanged.
+Vim key table; no default shortcut is imposed by the fork.
 
 Type to filter session names (Unicode case-insensitive substring search).
 Up/Down or Tab/Shift+Tab select a result while keeping search focused. Selection
 survives refreshes and follows a neighboring row after removal. Rows show
-Current, Open, Saved, or Archived status. **Show archived sessions** includes
-the archive, and **New Session** creates a fresh session.
+Current, Open, Saved, or Archived status; unsaved sessions are not listed.
+**Show archived sessions** includes the archive. The **New Session** button was
+removed; use Alt+N.
 
-| Shortcut | Selected-session action |
+| Shortcut | Action |
 |---|---|
+| Alt+S | Save the current window's session under its current name. The search text is not used; rename with Alt+R. |
+| Alt+N | Open a new window. With search text, it is a saved session with that name; without, an unsaved window. The hint line shows which one as you type. |
 | Enter | Focus an open session, or restore a saved session. Archived sessions are unarchived before opening. |
-| Ctrl+A | Archive; for an open session, save and close with the normal running-process confirmation. Unarchive an archived session. |
-| Ctrl+R | Rename. |
-| Ctrl+K | Ask to permanently delete a closed saved session and its snapshots. Open sessions must be closed first. |
+| Alt+A | Archive; for an open session, save and close with the normal running-process confirmation. Unarchive an archived session. |
+| Alt+R | Rename. |
+| Alt+K | Ask to permanently delete a closed saved session and its snapshots. Open sessions must be closed first. |
 | Escape | Dismiss the overlay. |
 
 Archiving retains the saved layout and terminal snapshots. Canceling a close

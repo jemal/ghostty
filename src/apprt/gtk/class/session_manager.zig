@@ -36,6 +36,7 @@ pub const SessionManager = extern struct {
         archived: *gtk.CheckButton,
         overlay: *adw.ToastOverlay,
         empty: *gtk.Label,
+        hint: *gtk.Label,
         timer: ?c_uint = null,
         hash: ?u64 = null,
         rename_id: u64 = 0,
@@ -93,9 +94,6 @@ pub const SessionManager = extern struct {
         const header = adw.HeaderBar.new();
         const title = adw.WindowTitle.new(i18n._("Sessions"), "");
         header.setTitleWidget(title.as(gtk.Widget));
-        const create = gtk.Button.newWithLabel(i18n._("New Session"));
-        create.as(gtk.Actionable).setActionName("sessions.new");
-        header.packStart(create.as(gtk.Widget));
         toolbar.addTopBar(header.as(gtk.Widget));
         const box = gtk.Box.new(.vertical, 12);
         const widget = box.as(gtk.Widget);
@@ -122,11 +120,13 @@ pub const SessionManager = extern struct {
         priv.empty = gtk.Label.new(i18n._("No saved sessions. Create a session or show archived sessions."));
         priv.empty.setWrap(1);
         box.append(priv.empty.as(gtk.Widget));
-        const hint = gtk.Label.new(i18n._("Enter Open · Ctrl+A Archive / Unarchive · Ctrl+R Rename · Ctrl+K Delete · Esc Close"));
+        const hint = gtk.Label.new(null);
         hint.setWrap(1);
         hint.as(gtk.Widget).addCssClass("caption");
         hint.as(gtk.Widget).addCssClass("dim-label");
         box.append(hint.as(gtk.Widget));
+        priv.hint = hint;
+        self.updateHint();
         toolbar.setContent(widget);
         priv.overlay = adw.ToastOverlay.new();
         priv.overlay.setChild(toolbar.as(gtk.Widget));
@@ -135,6 +135,7 @@ pub const SessionManager = extern struct {
         defer target.free();
         const actions = [_]ext.actions.Action(Self){
             .init("new", actionNew, null),
+            .init("save", actionSave, null),
             .init("open", actionOpen, target),
             .init("rename", actionRename, target),
             .init("archive", actionArchive, target),
@@ -244,6 +245,7 @@ pub const SessionManager = extern struct {
     }
 
     fn searchChanged(_: *gtk.Editable, self: *Self) callconv(.c) void {
+        self.updateHint();
         self.refresh(false);
     }
 
@@ -258,8 +260,17 @@ pub const SessionManager = extern struct {
             _ = self.as(adw.Dialog).close();
             return 1;
         }
-        if (mods.control_mask and !mods.alt_mask and !mods.super_mask) {
+        if (mods.alt_mask and !mods.control_mask and !mods.super_mask) {
             const action: [:0]const u8 = switch (keyval) {
+                // New and save do not depend on the selected row.
+                gdk.KEY_n, gdk.KEY_N => {
+                    _ = self.as(gtk.Widget).activateAction("sessions.new", null);
+                    return 1;
+                },
+                gdk.KEY_s, gdk.KEY_S => {
+                    _ = self.as(gtk.Widget).activateAction("sessions.save", null);
+                    return 1;
+                },
                 gdk.KEY_a, gdk.KEY_A => "sessions.archive",
                 gdk.KEY_k, gdk.KEY_K => "sessions.delete",
                 gdk.KEY_r, gdk.KEY_R => "sessions.rename",
@@ -296,6 +307,8 @@ pub const SessionManager = extern struct {
         log.warn("session management failed err={}", .{err});
         self.private().overlay.addToast(adw.Toast.new(if (err == error.SessionOpen)
             i18n._("This session is open. Close it before deleting it.")
+        else if (err == error.InvalidName)
+            i18n._("Enter a short session name without line breaks.")
         else
             i18n._("Unable to update this saved session.")));
     }
@@ -307,9 +320,57 @@ pub const SessionManager = extern struct {
     fn toggled(_: *gtk.CheckButton, self: *Self) callconv(.c) void {
         self.refresh(true);
     }
+    /// Open a new window. With search text, it is a saved session with that
+    /// name. Without, it is an unsaved window with a haiku name.
     fn actionNew(_: *gio.SimpleAction, _: ?*glib.Variant, self: *Self) callconv(.c) void {
-        Window.createSession();
+        const name = self.typedName() catch |err| return self.failed(err);
+        Window.createSession(name);
         _ = self.as(adw.Dialog).close();
+    }
+
+    /// Save the session of the window that owns the manager, under its
+    /// current name. The search text is not used; Alt+R renames.
+    fn actionSave(_: *gio.SimpleAction, _: ?*glib.Variant, self: *Self) callconv(.c) void {
+        const window = Application.default().sessionWindow(self.private().current_id) orelse return;
+        window.saveSession(null);
+        _ = self.as(adw.Dialog).close();
+    }
+
+    /// Show what Alt+N does with the current search text.
+    fn updateHint(self: *Self) void {
+        const priv = self.private();
+        const prefix = i18n._("Enter Open · Alt+S Save this window");
+        const suffix = i18n._("Alt+A Archive / Unarchive · Alt+R Rename · Alt+K Delete · Esc Close");
+        var buf: [512]u8 = undefined;
+        const text = text: {
+            const name = self.typedName() catch break :text std.fmt.bufPrintSentinel(
+                &buf,
+                "{s} · {s} · {s}",
+                .{ prefix, i18n._("Alt+N (name not valid)"), suffix },
+                0,
+            );
+            const new = if (name) |v| std.fmt.bufPrintSentinel(
+                &buf,
+                "{s} · Alt+N {s} “{s}” · {s}",
+                .{ prefix, i18n._("New session"), v, suffix },
+                0,
+            ) else std.fmt.bufPrintSentinel(
+                &buf,
+                "{s} · Alt+N {s} · {s}",
+                .{ prefix, i18n._("New unsaved window"), suffix },
+                0,
+            );
+            break :text new;
+        } catch return;
+        priv.hint.setText(text);
+    }
+
+    /// The search text as a session name, or null if the search is empty.
+    fn typedName(self: *Self) error{InvalidName}!?[]const u8 {
+        const text = std.mem.trim(u8, std.mem.span(self.private().search.as(gtk.Editable).getText()), &std.ascii.whitespace);
+        if (text.len == 0) return null;
+        if (!sessions.validName(text)) return error.InvalidName;
+        return text;
     }
     fn actionOpen(_: *gio.SimpleAction, param: ?*glib.Variant, self: *Self) callconv(.c) void {
         const id = (param orelse return).getUint64();

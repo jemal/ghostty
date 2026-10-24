@@ -1526,9 +1526,8 @@ pub const Application = extern struct {
     fn activate(self: *Self) callconv(.c) void {
         log.debug("activate", .{});
 
-        // A hidden quick terminal can keep the process alive. Restore again
-        // on reactivation when there are no regular windows left.
-        if (self.restoreSessions()) return;
+        // Saved sessions are not restored at startup. Every start opens a
+        // new, unsaved window, and the session manager opens saved sessions.
 
         // Queue a new window
         const priv = self.private();
@@ -1639,7 +1638,7 @@ pub const Application = extern struct {
         var current: ?*glib.List = self.as(gtk.Application).getWindows();
         while (current) |link| : (current = link.f_next) {
             const other = gobject.ext.cast(Window, @as(*gtk.Window, @ptrCast(@alignCast(link.f_data orelse continue)))) orelse continue;
-            if (other != window and !other.isQuickTerminal() and !other.isSessionArchived())
+            if (other != window and !other.isQuickTerminal() and other.isSessionSaved() and !other.isSessionArchived())
                 try ids.append(arena.allocator(), other.sessionId());
         }
         std.mem.sort(u64, ids.items, {}, std.sort.asc(u64));
@@ -1678,32 +1677,6 @@ pub const Application = extern struct {
         self.private().requested_window = true;
         _ = self.as(gobject.Object).bindProperty("config", window.as(gobject.Object), "config", .{});
         window.as(gtk.Window).present();
-    }
-
-    fn restoreSessions(self: *Self) bool {
-        if (!self.sessionsEnabled()) return false;
-        var current: ?*glib.List = self.as(gtk.Application).getWindows();
-        while (current) |link| : (current = link.f_next) {
-            const ptr: *gtk.Window = @ptrCast(@alignCast(link.f_data orelse continue));
-            const window = gobject.ext.cast(Window, ptr) orelse continue;
-            if (!window.isQuickTerminal()) return false;
-        }
-        const dir = self.sessionDir() catch return false;
-        defer dir.close(global.io());
-        const bytes = dir.readFileAlloc(global.io(), "active.json", self.allocator(), .limited(65536)) catch return false;
-        defer self.allocator().free(bytes);
-        const index = std.json.parseFromSlice(SessionIndex, self.allocator(), bytes, .{ .ignore_unknown_fields = true }) catch return false;
-        defer index.deinit();
-        if (index.value.version != sessions.version or index.value.sessions.len > sessions.max_sessions) return false;
-        var restored: usize = 0;
-        for (index.value.sessions) |id| {
-            self.openSession(id) catch |err| {
-                log.warn("unable to restore session {x} err={}", .{ id, err });
-                continue;
-            };
-            restored += 1;
-        }
-        return restored != 0;
     }
 
     fn dispose(self: *Self) callconv(.c) void {

@@ -114,9 +114,15 @@ template $GhosttyWindow: Adw.ApplicationWindow {
 
             child: Gtk.Box {
               spacing: 6;
-              Gtk.Label {
+              // The same width for every name, so the tab bar does not move
+              // when the session changes. New sessions are unsaved, so the
+              // name starts dimmed; the window removes "dim-label" on save.
+              Gtk.Label session_label {
+                styles ["dim-label"]
                 label: bind template.session-name;
                 ellipsize: end;
+                xalign: 0;
+                width-chars: bind $session_name_width(template.tabs-compact) as <int>;
                 max-width-chars: bind $session_name_width(template.tabs-compact) as <int>;
               }
               Gtk.Image { icon-name: "pan-down-symbolic"; }

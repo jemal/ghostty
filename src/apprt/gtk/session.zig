@@ -95,6 +95,50 @@ pub fn validName(name: []const u8) bool {
     return true;
 }
 
+/// The longest name that `haikuName` can make.
+pub const max_haiku_name_bytes = 15;
+
+/// A short, readable name made from a session ID, such as "misty-pond".
+/// The same ID always gives the same name.
+pub fn haikuName(buf: *[max_haiku_name_bytes]u8, id: u64) []const u8 {
+    const adjectives = [_][]const u8{
+        "amber",   "autumn", "bold",   "brave",  "bright", "calm",   "cold",   "cool",
+        "crimson", "dawn",   "dry",    "dusty",  "early",  "faded",  "fresh",  "frosty",
+        "gentle",  "golden", "green",  "hidden", "hollow", "icy",    "lively", "lone",
+        "lucky",   "misty",  "mossy",  "muddy",  "nimble", "noble",  "old",    "pale",
+        "patient", "plain",  "proud",  "quiet",  "rapid",  "rough",  "rustic", "sandy",
+        "shy",     "silent", "silver", "sleepy", "slow",   "small",  "snowy",  "soft",
+        "solar",   "spring", "steady", "still",  "stormy", "summer", "sunny",  "swift",
+        "tidy",    "twilit", "velvet", "woven",  "warm",   "wild",   "windy",  "winter",
+    };
+    const nouns = [_][]const u8{
+        "bay",    "birch", "bloom",  "brook", "cedar", "cliff", "cloud",  "comet",
+        "creek",  "dew",   "dune",   "dusk",  "ember", "fern",  "field",  "fire",
+        "flame",  "fog",   "forest", "frog",  "frost", "glade", "grove",  "hare",
+        "haze",   "heron", "hill",   "lake",  "leaf",  "maple", "marsh",  "meadow",
+        "moon",   "moss",  "night",  "oak",   "otter", "owl",   "path",   "peak",
+        "pine",   "pond",  "rain",   "reed",  "ridge", "river", "sea",    "shadow",
+        "shore",  "sky",   "snow",   "sound", "spark", "star",  "stone",  "storm",
+        "stream", "sun",   "thorn",  "tide",  "trail", "wave",  "willow", "wind",
+    };
+
+    const adjective = adjectives[@intCast(id % adjectives.len)];
+    const noun = nouns[@intCast((id / adjectives.len) % nouns.len)];
+    return std.fmt.bufPrint(buf, "{s}-{s}", .{ adjective, noun }) catch unreachable;
+}
+
+test "haiku names are stable and short" {
+    const testing = std.testing;
+    var a: [max_haiku_name_bytes]u8 = undefined;
+    var b: [max_haiku_name_bytes]u8 = undefined;
+    try testing.expectEqualStrings(haikuName(&a, 42), haikuName(&b, 42));
+    try testing.expect(validName(haikuName(&a, 42)));
+
+    // Every pair of words fits in the buffer.
+    var id: u64 = 0;
+    while (id < 64 * 64) : (id += 1) _ = haikuName(&a, id);
+}
+
 pub fn newId(io: std.Io) u64 {
     var id: u64 = 0;
     while (id == 0) io.random(std.mem.asBytes(&id));
