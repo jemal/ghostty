@@ -398,13 +398,13 @@ label.resize-overlay {
 .floating-terminal {
   background: var(--window-bg-color);
   color: var(--window-fg-color);
-  border: 1px solid color-mix(in srgb, currentColor 22%, transparent);
+  border: 1px solid color-mix(in srgb, currentColor 12%, transparent);
   border-radius: 10px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
 }
 
 .floating-terminal.active {
-  border-color: var(--accent-color);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
 }
 
 .floating-titlebar {
@@ -413,6 +413,6 @@ label.resize-overlay {
 }
 
 .floating-titlebar button {
-  padding: 2px 6px;
+  padding: 4px 6px;
   min-height: 22px;
 }

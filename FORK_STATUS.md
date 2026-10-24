@@ -6,6 +6,16 @@ This document records the work completed across the development chats, the curre
 
 ## Current checkpoint
 
+- Desktop-approved appearance follow-up on 2026-10-23: floating panels use a faint
+  neutral border instead of an accent outline, a deeper shadow for the selected
+  panel, and 4 px more header height through vertical padding. The GTK
+  ReleaseFast build with system Fontconfig passed. Review found no blocking
+  issues. Committed in jj change `wsolppyz`, then installed ReleaseFast with
+  system Fontconfig to `~/.local`. Running terminals were not restarted.
+  The user also reported small title artifacts on initial reveal. Cairo and
+  `GSK_DEBUG=full-redraw` trials were clean, suggesting partial-redraw trouble;
+  the exact cause is unconfirmed. The user chose to defer it. No renderer
+  workaround was made persistent.
 - Installed and desktop-approved on 2026-10-23: per-tab floating terminals
   are recorded in jj change `lptzpuoy`. The user tried the tabbed container and requested
   independent floating panels instead, approving directional focus with wrapping.
