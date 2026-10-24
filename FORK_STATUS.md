@@ -1,14 +1,27 @@
 # Ghostty fork: status and roadmap
 
-Updated: 2026-10-22
+Updated: 2026-10-23
 
-This document records the work completed across the two development chats, the current feature boundaries, and the ideas discussed for future work. It describes this fork's GTK/Linux implementation. It does not imply equivalent support in the macOS application.
+This document records the work completed across the development chats, the current feature boundaries, and the ideas discussed for future work. It describes this fork's GTK/Linux implementation. It does not imply equivalent support in the macOS application.
 
 ## Current checkpoint
 
 - Repository: `/home/jemal/dev/projects/ghostty`
 - `folie` contains the fork history, including themed chrome, the live theme
-  picker, the CLI working-directory fix, and the local Fontconfig build guidance.
+  picker, the CLI working-directory fix, the local Fontconfig build guidance,
+  Lua scripting (phases 1 to 3), the tab-title and font-reset fixes, and
+  unsaved-by-default sessions (haiku names, no startup restore, Alt+S / Alt+N
+  in the session manager, fixed-width session name). All passed the user's
+  desktop test on 2026-10-23 and are installed in `~/.local`.
+- Remotes: `origin` is upstream; `fork` is https://github.com/jemal/ghostty.
+  `folie` tracks `folie@fork`. Never push `folie` to `origin`. The newest
+  commits are not pushed yet.
+- Commit messages have no `Co-Authored-By` line (user rule).
+- Next session: read this file, `src/apprt/gtk/SESSION_RESTORE.md` and
+  `src/apprt/gtk/LUA_PLAN.md`, then `jj status`. Open approved work: floating
+  scratch terminal, wider compact tabs or a new title/tab bar, titlebar
+  time/status (needs Lua phase 4 events). Explored ideas are listed under
+  "New ideas from 2026-10-23".
 - The old feature bookmarks were removed; their commits remain in `folie`.
 - Daily use is through `~/.local/bin/ghostty`, built with system Fontconfig.
   The user reports that the font-zoom and theme-picker fixes seem good for now.
@@ -21,6 +34,10 @@ This document records the work completed across the two development chats, the c
 The fork is usable for daily local workflows. The next useful step is to build real integrations on the existing features, while keeping further UI changes focused.
 
 ## Current install and iteration workflow
+
+To test a change, build with `nix develop -c zig build` and let the user run
+it with `zig build run`. Install to `~/.local` (below) only after the user says
+the change is good enough (user rule, 2026-10-23).
 
 The user now uses a local ReleaseFast installation instead of rebuilding the
 Nix-profile/Home Manager package for each change. This is the preferred
@@ -82,9 +99,10 @@ remains subject to continued use.
   `ghostty +new-tab --working-directory=~/Documents/vault --title=Vault -e hx`.
   Nushell aliases are not external executables; use `hx` directly rather than
   `nu -c e` when `e` is an interactive alias.
-- The user chose to keep automatic restoration of the previous workspace.
-  `+new-split` is explicitly deferred. Parameterized native tab bindings are
-  deferred to Lua exploration. No next feature has been approved.
+- On 2026-10-23 the user changed the earlier choice: startup no longer
+  restores sessions. New windows are unsaved; the session manager saves and
+  opens sessions. `+new-split` is still deferred. Native tab bindings with a
+  directory and command are now possible with Lua (`ghostty.tab`).
 - Next session: read this file and `src/apprt/gtk/SESSION_RESTORE.md`, inspect
   `jj status`, and continue from `folie`. Keep UI iteration based on user
   feedback. Do not restart isolated X11 screenshot tests.
@@ -105,7 +123,7 @@ validation, not instructions to repeat those checks.
 
 ### Named sessions
 
-One session represents one terminal window. Sessions can be named, renamed, reopened, and restored at startup when enabled with:
+One session represents one terminal window. Sessions can be named, renamed, saved and reopened when enabled with the setting below. Since 2026-10-23, new windows are unsaved sessions with haiku names, only saved sessions are written to disk, and startup does not restore sessions. See `src/apprt/gtk/SESSION_RESTORE.md`.
 
 ```ini
 window-save-state = always
@@ -133,16 +151,21 @@ Missing, corrupt, incompatible, or oversized snapshots fall back independently. 
 Clicking the session name in the header opens one searchable floating Sessions
 overlay. The command palette and GTK-only `switch_session` action open the same
 UI. Alt+Space is declared in the user's Home Manager source, including Vim
-mode. Startup restoration stays enabled.
+mode. Alt+S saves the current session and Alt+N opens a new one (2026-10-23,
+committed); the New Session button was removed.
 
 Type to filter names; Up/Down and Tab/Shift+Tab select a session. Rows show
-Current, Open, Saved, or Archived status. **New Session** creates a session;
-**Show archived sessions** includes the archive. A compact footer shows:
+Current, Open, Saved, or Archived status; unsaved sessions are not listed.
+**Show archived sessions** includes the archive. A compact footer shows the
+shortcuts. Since 2026-10-23 they use Alt, not Ctrl (user request):
 
 - Enter: open or focus the selected session.
-- Ctrl+A: archive; unarchive when an archived session is selected.
-- Ctrl+R: rename the selected session.
-- Ctrl+K: delete a closed session after confirmation.
+- Alt+S: save the current window's session under its current name.
+- Alt+N: new window; saved with the typed name, or unsaved when the search is
+  empty. The footer shows which one as you type.
+- Alt+A: archive; unarchive when an archived session is selected.
+- Alt+R: rename the selected session.
+- Alt+K: delete a closed session after confirmation.
 - Escape: dismiss the overlay.
 
 Archiving an open session saves and closes it, with the normal running-process
@@ -267,7 +290,7 @@ copying the invoking shell's environment. This behavior was not changed.
 See `src/apprt/gtk/SESSION_RESTORE.md` for usage
 and `src/apprt/gtk/THEME_PICKER_PLAN.md` for design and future validation cases.
 
-### Lua scripting (phase 1)
+### Lua scripting (phases 1 to 3)
 
 `$XDG_CONFIG_HOME/ghostty/init.lua` can define actions and keybinds. It adds
 to the INI config and does not replace it. The model is the Rex Lua API.
@@ -400,13 +423,58 @@ These record the user's ideas for discussion, not a priority order. The Quiet ra
 - **`+new-split` CLI action:** Deferred at the user's request.
 - **`+new-tab` with a working directory and command:** Directory precedence is fixed and confirmed by the user on the desktop. The environment behavior is documented above.
 - **Session startup and keyboard access:** The user prefers keeping automatic startup restoration. Keyboard access uses `switch_session`, with Alt+Space in the user's configuration.
-- **Floating session manager:** Merged with session switching into one searchable, window-owned floating libadwaita dialog with Enter, Ctrl+A, Ctrl+R, and Ctrl+K shortcuts; the user approved the merged UI. Extended lifecycle validation is not claimed.
+- **Floating session manager:** Merged with session switching into one searchable, window-owned floating libadwaita dialog with Enter, Alt+A, Alt+R, and Alt+K shortcuts; the user approved the merged UI. Extended lifecycle validation is not claimed.
 - **Random haiku session names:** Give new sessions generated, readable names, with manual renaming still available.
 - **Wider compact tabs or a title/tab bar redesign:** Explore wider tabs in compact mode, or redesign the combined title/tab bar to improve its appearance.
 - **Lua VM:** Phase 1 is implemented; see "Lua scripting (phase 1)" above and `src/apprt/gtk/LUA_PLAN.md`. The user decided not to replace the INI config. The original idea: explore embedded Lua for scripting, potentially including replacement of the current INI-style configuration system. No scripting API or configuration migration approach has been selected. Revisit native keybindings that create tabs with a working directory, title, and command during this exploration; the user prefers deferring this capability rather than extending the current `new_tab` binding syntax now. The existing CLI can be invoked through Nushell or compositor shortcuts in the meantime.
 - **Optional titlebar time/status:** Add an option to display the time in the titlebar. Consider richer configurable status content, potentially driven by Lua.
 - **UI chrome themed from the active terminal palette:** Allow the titlebar, tab rail, session selector, menus, and other chrome to derive colors from the current ANSI/terminal theme instead of fixed colors. Explore background/foreground and palette-based accents, readable contrast for text and controls, and live updates when the theme changes. How to choose the chrome palette when panes use different themes remains a design question.
 - **Live theme picker (initial implementation):** Implemented and committed. Browse installed themes with live previews across the current window's terminals and chrome. Enter retains the choice for that window; Escape restores its previous appearance. The first version does not save config. See `src/apprt/gtk/THEME_PICKER_PLAN.md` for appearance isolation, runtime scope, and precedence rules. The user approved the desktop trial on 2026-10-22.
+
+### Approved on 2026-10-23
+
+The user approved these ideas for implementation. No order is set yet.
+
+- Floating scratch terminal (see "Floating terminals" above).
+- Random haiku session names: done 2026-10-23, together
+  with Alt+N/Alt+S, unsaved sessions and a fixed-width session name.
+- Wider compact tabs, or a new title/tab bar design.
+- Titlebar time/status. Lua phase 4 events would drive it.
+
+### New ideas from 2026-10-23 (explored, not approved)
+
+Findings from the code are in the conversation of 2026-10-23. Short form:
+
+- **Some sessions not saved:** done 2026-10-23 as the
+  user's design: new windows are unsaved, Alt+S in the manager saves the
+  current window under its current name, and
+  startup does not restore.
+- **Placement for new tabs and splits:** `window-new-tab-position` has only
+  `current` and `end`. `+new-tab` and Lua could take a position (relative or
+  absolute). Splits already take a direction.
+- **`+new-tab --title` names only the pane:** fixed (2026-10-23, desktop test
+  passed). `Tab.new` now sets the tab's `title-override` and gives the
+  first pane no title. This covers `+new-tab`, `+new-window`, `ghostty.tab`
+  and `ghostty.window`.
+- **Alt+N in the session manager:** done 2026-10-23.
+  With typed text, it opens a saved session with that name; without, an
+  unsaved window. The New Session button was removed.
+- **Picker for links in view:** `renderer/link.zig` already matches the
+  `link` regexes in the viewport for hover. OSC 8 hyperlinks are in the page
+  cells. A Lua API that returns them (or the viewport text) would let a
+  script build the picker.
+- **Vim-style cursor mode in scrollback:** not in upstream. Upstream has
+  search and `adjust_selection` only. Large feature.
+- **Restore Helix panes:** sessions save the directory, not the program.
+  Could save the foreground command line (`/proc/<pid>/cmdline`) for known
+  programs and type it into the new shell at restore.
+- **Font size reset:** fixed (2026-10-23, desktop test passed). A surface
+  that inherits a zoomed size now keeps `font-size` from the config as its
+  original size, so reset goes back to the configured size. The inherited
+  zoom counts as an adjustment, so a config reload keeps it.
+- **Tasks from `.vscode/tasks.json` / `.zed/tasks.json`:** possible as a Lua
+  script with `exec` + `pick` + `split`. Lua has no JSON parser; add
+  `ghostty.json.decode` (Rex has `rex.json`).
 
 ## Commit checkpoints
 
@@ -415,7 +483,9 @@ commit hashes. Only `main` and `folie` remain as local bookmarks. The fork's
 16 original author dates were randomized in order from 19:30 to 21:42 CEST on
 2026-10-22. Committer dates record subsequent rewrites; `jj log` displays those
 by default. Do not interpret its relative times as the randomized author dates.
-Nothing was pushed during this work.
+On 2026-10-23, `folie` was pushed to the `fork` remote
+(https://github.com/jemal/ghostty) and tracks `folie@fork`. `origin` is
+upstream; `main` tracks `main@origin`. Never push `folie` to `origin`.
 
 | jj change | Change |
 |---|---|
@@ -440,13 +510,19 @@ Nothing was pushed during this work.
 | `zpwtzozm` | gtk: add Lua scripting for actions and keybinds (phase 1) |
 | `onykxtxm` | gtk: let Lua inspect panes and open splits, tabs and windows (phase 2) |
 | `qpmzpspo` | gtk: let Lua actions wait for processes, the picker and timers (phase 3) |
+| `ttzpzmnp` | gtk: let a title for a new tab name the tab |
+| `yusoxzrx` | gtk: reset an inherited font size to the configured size |
+| `xslmnnxk` | gtk: make sessions unsaved until the user saves them |
+| `mnzxlrvt` | docs: record the 2026-10-23 fork work in FORK_STATUS.md |
 
 ## Related implementation documentation
 
 - `src/apprt/gtk/SESSION_RESTORE.md`: configuration, session semantics, storage, snapshots, pane actions, and validation.
 - `src/apprt/gtk/PICKER_IPC.md`: request/response schema, endpoint targeting, lifecycle, limits, D-Bus methods, and Nushell usage.
 - `src/apprt/gtk/THEME_PICKER_PLAN.md`: implemented live theme picker and reference plan, appearance isolation, runtime scope, and validation criteria.
-- `src/apprt/gtk/LUA_PLAN.md`: Lua scripting API, the phase 1 state, and the plan for phases 2 to 4.
+- `src/apprt/gtk/LUA_PLAN.md`: Lua scripting API, the state of phases 1 to 3, and the plan for phase 4.
+- User tooling outside the repository: `~/.config/ghostty/types/ghostty.lua` (LuaLS `---@meta` types for the API), `.luarc.json` and `stylua.toml` (2 spaces, double quotes, 100 columns, `call_parentheses = "NoSingleTable"`, one-line conditionals allowed). Keep the types file in step with the API.
+- `~/dev/rust-terminal-idea.md`: notes for a possible Rust terminal on libghostty-vt (idea only; this fork has priority).
 - `test/gtk-picker.py`: portable isolated GTK picker integration checks.
 
 Keep this document updated at feature checkpoints. Move roadmap entries into completed features only after implementation and validation; distinguish newly approved work from speculative ideas.
