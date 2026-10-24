@@ -6,6 +6,27 @@ This document records the work completed across the development chats, the curre
 
 ## Current checkpoint
 
+- Installed on 2026-10-23: Lua phase 4 events and titlebar status. The user
+  approved the final titlebar layout on the desktop before installation.
+  `ghostty.on` supports surface creation/closure, directory/title changes,
+  session opening and command completion. Owned snapshots are delivered as
+  coroutine tasks, one handler per GTK tick; reload retires old delivery.
+  `ghostty.status(text, { surface? })` updates one window or, with surface 0,
+  every window and the default for future windows. The combined titlebar has
+  a clickable session name without an arrow, a short divider, optional status
+  of up to two lines,
+  then a divider before the tabs. Separate headerbars show status beside their
+  controls. Compact mode hides the new-tab/menu/window buttons; native tab
+  styling retains its controls. The name fits its content up to 24 characters,
+  with status capped at 28 characters of width. Empty status collapses.
+  A guarded clock example and LuaLS types were added directly to the user's
+  Home Manager sources, preserving the configuration links. GTK build with
+  system Fontconfig, all 97 final Lua tests and Zig formatting passed. Timer
+  operations retain the Lua runtime allocator so timers registered during
+  init.lua loading work before the GTK application exists; the production
+  timer regression also passed. Review found no blocking issues. Installed
+  ReleaseFast with system Fontconfig to `~/.local`; running sessions were not
+  restarted. Recorded in jj change `upyuptwx`.
 - Installed and desktop-approved on 2026-10-23: per-program Lua restore commands. `commands` in
   `ghostty.session.relaunch` maps registered names to replacement argv; other
   programs replay captured arguments. Claude uses `claude --continue`, Codex
@@ -73,8 +94,8 @@ This document records the work completed across the development chats, the curre
 - Commit messages have no `Co-Authored-By` line (user rule).
 - Next session: read this file, `src/apprt/gtk/SESSION_RESTORE.md` and
   `src/apprt/gtk/LUA_PLAN.md`, then `jj status`. Open approved work: floating
-  scratch terminal and titlebar
-  time/status (needs Lua phase 4 events). Explored ideas are listed under
+  scratch terminal. Lua phase 4 events and titlebar status are implemented.
+  Explored ideas are listed under
   "New ideas from 2026-10-23".
 - The old feature bookmarks were removed; their commits remain in `folie`.
 - Daily use is through `~/.local/bin/ghostty`, built with system Fontconfig.
@@ -383,7 +404,10 @@ picker, through a new native entry point in the picker service),
 `ghostty.sleep`, `ghostty.after`, `ghostty.every` and `ghostty.cancel`.
 A reload or exit stops waiting processes, pickers and timers. Its tests and
 the ReleaseFast build passed and it is installed. The user's desktop test
-passed on 2026-10-23. Phase 4 (events) is not started. See
+passed on 2026-10-23. Phase 4 adds queued `ghostty.on` lifecycle events and
+`ghostty.status` for transient window status with up to two lines. The compact
+titlebar groups the clickable session name, status and tabs with short
+dividers; the user approved the final layout on 2026-10-23. See
 `src/apprt/gtk/LUA_PLAN.md`.
 
 ### Program relaunch on restore
@@ -527,7 +551,8 @@ The user approved these ideas for implementation. No order is set yet.
 - Wider compact tabs: done 2026-10-23 by respecting `gtk-wide-tabs`, with
   desktop approval. Session-aware toolbar hiding was also implemented and
   approved. A broader title/tab bar redesign remains optional future work.
-- Titlebar time/status. Lua phase 4 events would drive it.
+- Titlebar time/status: implemented with Lua phase 4 events; the horizontal
+  session/status area passed the user's desktop trial on 2026-10-23.
 
 ### New ideas from 2026-10-23 (explored, not approved)
 
@@ -606,13 +631,14 @@ upstream; `main` tracks `main@origin`. Never push `folie` to `origin`.
 | `kqzsmzko` | gtk: restore saved sessions in unsaved windows |
 | `rypyunky` | gtk: relaunch registered programs when restoring sessions |
 | `kypvvzst` | gtk: configure session relaunch commands in Lua |
+| `upyuptwx` | gtk: add Lua events and titlebar status |
 
 ## Related implementation documentation
 
 - `src/apprt/gtk/SESSION_RESTORE.md`: configuration, session semantics, storage, snapshots, pane actions, and validation.
 - `src/apprt/gtk/PICKER_IPC.md`: request/response schema, endpoint targeting, lifecycle, limits, D-Bus methods, and Nushell usage.
 - `src/apprt/gtk/THEME_PICKER_PLAN.md`: implemented live theme picker and reference plan, appearance isolation, runtime scope, and validation criteria.
-- `src/apprt/gtk/LUA_PLAN.md`: Lua scripting API, the state of phases 1 to 3, and the plan for phase 4.
+- `src/apprt/gtk/LUA_PLAN.md`: Lua scripting API and implemented phases 1 to 4.
 - User tooling outside the repository: `~/.config/ghostty/types/ghostty.lua` (LuaLS `---@meta` types for the API), `.luarc.json` and `stylua.toml` (2 spaces, double quotes, 100 columns, `call_parentheses = "NoSingleTable"`, one-line conditionals allowed). Keep the types file in step with the API.
 - `~/dev/rust-terminal-idea.md`: notes for a possible Rust terminal on libghostty-vt (idea only; this fork has priority).
 - `test/gtk-picker.py`: portable isolated GTK picker integration checks.

@@ -69,6 +69,14 @@ template $GhosttyWindow: Adw.ApplicationWindow {
 
         [end]
         Gtk.Box {
+          spacing: 6;
+          Gtk.Label header_status {
+            styles ["dim-label", "session-status"]
+            visible: false;
+            ellipsize: end;
+            lines: 2;
+            max-width-chars: 24;
+          }
           Gtk.ToggleButton {
             icon-name: "view-grid-symbolic";
             tooltip-text: _("View Open Tabs");
@@ -101,7 +109,7 @@ template $GhosttyWindow: Adw.ApplicationWindow {
 
           Gtk.WindowControls {
             side: start;
-            visible: bind $titlebar_style_is_tabs(template.titlebar-style) as <bool>;
+            visible: bind $native_tab_controls(template.titlebar-style, template.tabs-compact) as <bool>;
           }
 
           Gtk.Button session_button {
@@ -114,19 +122,48 @@ template $GhosttyWindow: Adw.ApplicationWindow {
 
             child: Gtk.Box {
               spacing: 6;
-              // The same width for every name, so the tab bar does not move
-              // when the session changes. New sessions are unsaved, so the
-              // name starts dimmed; the window removes "dim-label" on save.
+              // Fit the name, with a cap for long custom names. Unsaved names
+              // start dimmed; the window removes "dim-label" on save.
               Gtk.Label session_label {
-                styles ["dim-label"]
+                styles ["dim-label", "session-name"]
                 label: bind template.session-name;
                 ellipsize: end;
                 xalign: 0;
-                width-chars: bind $session_name_width(template.tabs-compact) as <int>;
                 max-width-chars: bind $session_name_width(template.tabs-compact) as <int>;
               }
-              Gtk.Image { icon-name: "pan-down-symbolic"; }
             };
+          }
+
+          Gtk.Box {
+            visible: bind session_status.visible;
+            valign: center;
+
+            Gtk.Separator {
+              styles ["session-divider"]
+              visible: bind template.session-enabled;
+              orientation: vertical;
+              height-request: 16;
+              margin-start: 6;
+              margin-end: 10;
+            }
+            Gtk.Label session_status {
+              styles ["dim-label", "session-status"]
+              visible: false;
+              ellipsize: end;
+              lines: 2;
+              xalign: 0;
+              max-width-chars: 28;
+            }
+          }
+
+          Gtk.Separator {
+            styles ["session-divider"]
+            visible: bind template.session-enabled;
+            orientation: vertical;
+            valign: center;
+            height-request: 24;
+            margin-start: 12;
+            margin-end: 8;
           }
 
           Adw.SplitButton {
@@ -148,17 +185,7 @@ template $GhosttyWindow: Adw.ApplicationWindow {
         [end]
         Gtk.Box {
           orientation: horizontal;
-          visible: bind $titlebar_style_is_tabs(template.titlebar-style) as <bool>;
-
-          Gtk.Button {
-            styles ["flat"]
-            visible: bind $compact_tab_controls(template.titlebar-style, template.tabs-compact) as <bool>;
-            icon-name: "tab-new-symbolic";
-            tooltip-text: _("New Tab");
-            action-name: "win.new-tab";
-            can-focus: false;
-            focus-on-click: false;
-          }
+          visible: bind $native_tab_controls(template.titlebar-style, template.tabs-compact) as <bool>;
 
           Gtk.ToggleButton {
             visible: bind $native_tab_controls(template.titlebar-style, template.tabs-compact) as <bool>;

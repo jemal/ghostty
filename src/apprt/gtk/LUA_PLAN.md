@@ -3,7 +3,81 @@
 Status: phase 1 is implemented and passed the user's desktop test
 (2026-10-22). Phase 2 is implemented and passed the user's desktop test.
 Phase 3 is implemented and passed the user's desktop test (2026-10-23). Phase 4
-is not started.
+events and titlebar status are implemented. The user approved the final
+titlebar layout on the desktop on 2026-10-23; focused Lua tests passed.
+
+## Phase 4: events
+
+Register handlers while `init.lua` loads with `ghostty.on(event, function(ctx, data) ... end)`.
+Handlers run in registration order as independent tasks, with the same wait
+functions and time budget as actions. Errors in one handler do not stop others.
+Only one handler starts per event tick, allowing GTK to handle input between them.
+Events are queued until GTK finishes the current mutation; they never call Lua
+inside core initialization, title setters or pane disposal. At most 128 handlers
+and 1,024 pending events are allowed. A full queue drops new events with a log
+warning. Reload discards old registrations, pending delivery and waiting tasks.
+
+`ctx.surface` is the live runtime pane ID. Session opening waits until its
+active pane initializes. It is unrelated to the saved pane ID. Event data is a
+snapshot; a pane may already be closed when its handler runs or resumes.
+
+| Event | Data |
+|---|---|
+| `surface_created` | `title?`, `pwd?`; emitted after core initialization, including lazily initialized restored panes |
+| `surface_closed` | Last `title?`, `pwd?`; emitted once when an initialized pane is disposed |
+| `pwd_changed` | New `pwd?`, `title?`; duplicate directory reports are ignored |
+| `title_changed` | New terminal `title?`, `pwd?`; duplicate reports are ignored; manual title overrides are separate |
+| `session_opened` | `session_id`, `name`; successful saved-session restoration, including in-place; focusing an already-open session does not emit it |
+| `command_finished` | `exit_code?`, `duration` in seconds, `title?`, `pwd?`; shell integration OSC 133 command completion, independent of desktop notification settings |
+
+```lua
+ghostty.on("command_finished", function(ctx, event)
+  if event.exit_code and event.exit_code ~= 0 then
+    ghostty.toast("Command exited with " .. event.exit_code)
+  end
+end)
+```
+
+## Titlebar status
+
+`ghostty.status(text, { surface? })` sets a window's plain-text status. `surface`
+defaults to `ctx.surface`; 0 updates every window and the default for future
+windows. Calls while `init.lua` loads set that default without touching the UI.
+`nil` or an empty string clears it. Text must be valid UTF-8, at most 256 bytes
+and two lines (one newline, no other control characters). Returns `true`, or
+`nil, err` for a missing pane.
+This is window status: events from two panes in one window share that line.
+
+The combined tab titlebar uses a clickable session name, a short
+divider, a status block with up to two lines, then a divider before the tabs.
+Compact tabs omit the new-tab/menu/window-control strip. The session name fits
+its content up to 24 characters; status is capped at 28 characters of width.
+Native tab style retains its controls. Long text is ellipsized with a full
+tooltip. Empty status and its inner divider collapse. With a separate
+headerbar, status appears beside the header controls. Existing toolbar hiding
+rules still apply. Status is transient, resets on hard reload and session
+replacement, and is not written into session files.
+
+Use Lua's local time and the existing timer API for a clock:
+
+```lua
+local function clock()
+  ghostty.status(os.date("%a %d %b\n%H:%M"), { surface = 0 })
+end
+clock()
+ghostty.every(1, clock)
+```
+
+An event handler can instead show command results for its window:
+
+```lua
+ghostty.on("command_finished", function(ctx, event)
+  ghostty.status(("Exit %s · %.1fs"):format(event.exit_code or "?", event.duration))
+end)
+```
+
+A global clock replaces any window-specific text on its next tick; compose
+clock and event information in one Lua function if both should remain visible.
 
 ## Phase 3: what exists now
 
@@ -12,8 +86,8 @@ Program relaunch is implemented and desktop-approved (2026-10-23): load-time
 executable basenames (additive, maximum 64). The current runtime controls capture
 and relaunch; nothing is allowed by default. Linux sessions store eligible argv
 and cwd; a fresh shell relaunches after OSC 133 readiness, with literal quoting.
-See `SESSION_RESTORE.md` for cancellation and supported shells. This does not
-add phase 4 events, devshell reconstruction or editor-internal state restoration.
+See `SESSION_RESTORE.md` for cancellation and supported shells. Program relaunch
+does not reconstruct devshells or editor-internal state.
 
 An optional `commands` table maps registered executable
 names to replacement argv for restoration, for example
@@ -273,7 +347,8 @@ bound function shows as a toast and goes to the log.
 | `ghostty.exec.start(argv, opts)` | Not done. Starts a process and returns a handle with `wait`, `write`, `kill`, `running`. |
 | `ghostty.pick{ surface?, title?, placeholder?, placement?, choices }` | Done in phase 3. Opens the native picker and waits for the choice. Returns the choice ID, or nil when the picker is cancelled. |
 | `ghostty.sleep(seconds)`, `ghostty.after(seconds, fn)`, `ghostty.every(seconds, fn)`, `ghostty.cancel(id)` | Done in phase 3. Timers. |
-| `ghostty.on(event, fn)` | Phase 4. Events: `surface_created`, `surface_closed`, `pwd_changed`, `title_changed`, `session_opened`, `command_finished`. |
+| `ghostty.on(event, fn)` | Phase 4. Queued lifecycle handlers; see the events section above. |
+| `ghostty.status(text, { surface? })` | Window status below the session name; 0 updates all windows. |
 
 ### ctx
 
@@ -391,7 +466,8 @@ the target of `/proc/<pid>/cwd`. Add `foreground_cwd` and `foreground_name`
    example script works.
 3. **Waiting.** Coroutines, `ghostty.exec`, `ghostty.pick`, timers, the
    instruction limit.
-4. **Events.** `ghostty.on`. Later: titlebar status text from Lua.
+4. **Events and status.** `ghostty.on` and `ghostty.status` are implemented;
+   the titlebar layout passed the user's desktop trial on 2026-10-23.
 
 ## Validation
 

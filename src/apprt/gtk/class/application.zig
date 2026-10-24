@@ -474,6 +474,7 @@ pub const Application = extern struct {
         const priv: *Private = self.private();
         priv.config.unref();
         if (priv.lua) |runtime| lua.retire(runtime);
+        priv.lua = null;
         priv.winproto.deinit();
         priv.open_uri.deinit();
         priv.global_shortcuts.unref();
@@ -882,6 +883,16 @@ pub const Application = extern struct {
     pub fn sessionRelaunchArguments(self: *Self, program: []const u8) ?[]const []const u8 {
         const runtime = self.private().lua orelse return null;
         return runtime.relaunchArguments(program);
+    }
+
+    pub fn emitLuaEvent(self: *Self, event: lua.Runtime.Event) void {
+        const runtime = self.private().lua orelse return;
+        runtime.emit(event);
+    }
+
+    pub fn defaultLuaStatus(self: *Self) [:0]const u8 {
+        const runtime = self.private().lua orelse return "";
+        return runtime.default_status orelse "";
     }
 
     /// Open a new window. Lua's `ghostty.window` uses this.
@@ -1691,6 +1702,7 @@ pub const Application = extern struct {
         defer manifest.deinit();
         const window = try Window.restoreSession(manifest.value);
         self.presentSessionWindow(window);
+        window.emitSessionOpened();
     }
 
     pub fn presentSessionWindow(self: *Self, window: *Window) void {
@@ -3012,8 +3024,10 @@ const Action = struct {
         if (!opts.soft) {
             var windows: ?*glib.List = self.as(gtk.Application).getWindows();
             while (windows) |link| : (windows = link.f_next) {
-                if (gobject.ext.cast(Window, @as(*gtk.Window, @ptrCast(@alignCast(link.f_data orelse continue))))) |window|
+                if (gobject.ext.cast(Window, @as(*gtk.Window, @ptrCast(@alignCast(link.f_data orelse continue))))) |window| {
                     window.clearTheme();
+                    window.setLuaStatus(self.defaultLuaStatus());
+                }
             }
         }
 

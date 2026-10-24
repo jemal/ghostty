@@ -88,7 +88,8 @@ pub fn loadConfig(alloc: Allocator) !Loaded {
 /// runs now, for example an action that reloads the configuration, the
 /// runtime is freed later, when GTK is idle.
 pub fn retire(runtime: *Runtime) void {
-    if (runtime.depth == 0) return runtime.destroy();
+    runtime.retired = true;
+    if (runtime.depth == 0 and !runtime.dispatching) return runtime.destroy();
     _ = glib.idleAdd(destroyLater, runtime);
 }
 
@@ -110,7 +111,24 @@ const host: Runtime.Host = .{
     .exec = exec,
     .pick = pick,
     .timer = timer,
+    .status = status,
 };
+
+fn status(_: *anyopaque, surface_id: u64, text: [:0]const u8) bool {
+    const app = Application.default();
+    if (surface_id == 0) {
+        var windows: ?*glib.List = app.as(gtk.Application).getWindows();
+        while (windows) |link| : (windows = link.f_next) {
+            const window = gobject.ext.cast(Window, @as(*gtk.Window, @ptrCast(@alignCast(link.f_data orelse continue)))) orelse continue;
+            window.setLuaStatus(text);
+        }
+        return true;
+    }
+    const surface = app.core().findSurfaceByID(surface_id) orelse return false;
+    const window = ext.getAncestor(Window, surface.rt_surface.surface.as(gtk.Widget)) orelse return false;
+    window.setLuaStatus(text);
+    return true;
+}
 
 fn invoke(_: *anyopaque, surface_id: u64, action: input.Binding.Action) bool {
     const surface = Application.default().core().findSurfaceByID(surface_id) orelse return false;
@@ -403,19 +421,23 @@ fn pickDone(ptr: *anyopaque, id: ?[]const u8) void {
 
 /// A GLib timer for `ghostty.sleep`, `ghostty.after` and `ghostty.every`.
 const TimerOp = struct {
+    alloc: Allocator,
     callback: Runtime.Callback,
     source: c_uint = 0,
 
     fn cancel(ptr: *anyopaque) void {
         const op: *TimerOp = @ptrCast(@alignCast(ptr));
         _ = glib.Source.remove(op.source);
-        Application.default().allocator().destroy(op);
+        op.alloc.destroy(op);
     }
 };
 
 fn timer(_: *anyopaque, callback: Runtime.Callback, ms: u32) Allocator.Error!Runtime.Wait {
-    const op = try Application.default().allocator().create(TimerOp);
-    op.* = .{ .callback = callback };
+    // init.lua can register timers before Application.new has created the
+    // default GTK application. Keep the runtime allocator through cleanup too.
+    const alloc = callback.runtime.alloc;
+    const op = try alloc.create(TimerOp);
+    op.* = .{ .alloc = alloc, .callback = callback };
     op.source = glib.timeoutAdd(ms, timerFired, op);
     return .{ .ptr = op, .cancel = TimerOp.cancel };
 }
@@ -423,9 +445,16 @@ fn timer(_: *anyopaque, callback: Runtime.Callback, ms: u32) Allocator.Error!Run
 fn timerFired(data: ?*anyopaque) callconv(.c) c_int {
     const op: *TimerOp = @ptrCast(@alignCast(data.?));
     const callback = op.callback;
-    Application.default().allocator().destroy(op);
+    op.alloc.destroy(op);
     callback.runtime.complete(callback.id, .timer);
     return 0;
+}
+
+test "Lua host timers allocate and cancel before the GTK application exists" {
+    const runtime = try Runtime.create(std.testing.allocator, host);
+    defer runtime.destroy();
+    const wait = try timer(host.ptr, .{ .runtime = runtime, .id = 1 }, 60_000);
+    wait.cancel(wait.ptr);
 }
 
 fn open(

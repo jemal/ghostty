@@ -76,6 +76,9 @@ pub const Host = struct {
     /// After `ms` milliseconds, call `Runtime.complete` with a `timer`
     /// result.
     timer: *const fn (ptr: *anyopaque, callback: Callback, ms: u32) Allocator.Error!Wait,
+
+    /// Set window status for a pane, or all windows when surface is zero.
+    status: *const fn (ptr: *anyopaque, surface: u64, text: [:0]const u8) bool,
 };
 
 /// Where the host gives the result of an operation.
@@ -228,6 +231,27 @@ const Bind = struct {
     performable: bool,
 };
 
+pub const Event = struct {
+    kind: Kind,
+    surface: u64 = 0,
+    title: ?[]const u8 = null,
+    pwd: ?[]const u8 = null,
+    session_id: ?u64 = null,
+    name: ?[]const u8 = null,
+    exit_code: ?u8 = null,
+    duration: ?f64 = null,
+
+    pub const Kind = enum { surface_created, surface_closed, pwd_changed, title_changed, session_opened, command_finished };
+
+    fn deinit(self: Event, alloc: Allocator) void {
+        if (self.title) |v| alloc.free(v);
+        if (self.pwd) |v| alloc.free(v);
+        if (self.name) |v| alloc.free(v);
+    }
+};
+
+const Subscription = struct { kind: Event.Kind, ref: c_int };
+
 alloc: Allocator,
 
 /// Owns action names, titles, descriptions and binds.
@@ -244,6 +268,14 @@ actions: std.StringArrayHashMapUnmanaged(Action) = .empty,
 binds: std.ArrayList(Bind) = .empty,
 relaunch_programs: std.ArrayList([]const u8) = .empty,
 relaunch_commands: std.StringHashMapUnmanaged([]const []const u8) = .empty,
+subscriptions: std.ArrayList(Subscription) = .empty,
+events: std.ArrayList(Event) = .empty,
+event_wait: ?Wait = null,
+event_id: ?u32 = null,
+event_handler: usize = 0,
+dispatching: bool = false,
+retired: bool = false,
+default_status: ?[:0]const u8 = null,
 
 /// True while `init.lua` runs. Some functions work only at load time.
 loading: bool = false,
@@ -292,6 +324,11 @@ pub fn create(alloc: Allocator, host: Host) InitError!*Runtime {
 }
 
 pub fn destroy(self: *Runtime) void {
+    if (self.default_status) |text| self.alloc.free(text);
+    if (self.event_wait) |wait| wait.cancel(wait.ptr);
+    for (self.events.items) |event| event.deinit(self.alloc);
+    self.events.deinit(self.alloc);
+    self.subscriptions.deinit(self.alloc);
     // Stop all host operations, so the host never calls `complete` on a
     // runtime that is gone.
     var tasks = self.tasks.valueIterator();
@@ -382,6 +419,11 @@ pub fn run(self: *Runtime, name: []const u8, surface: u64) bool {
 /// host calls this when an operation from `exec`, `pick` or `timer` ends.
 /// Strings in `result` must stay valid only during the call.
 pub fn complete(self: *Runtime, id: u32, result: Result) void {
+    if (self.event_id == id) {
+        self.event_wait = null;
+        self.event_id = null;
+        return self.dispatchEvents();
+    }
     if (self.timers.contains(id)) return self.fireTimer(id);
 
     const task = self.tasks.getPtr(id) orelse return;
@@ -421,6 +463,10 @@ pub fn complete(self: *Runtime, id: u32, result: Result) void {
 /// with `ctx` and `args`. Pops the function. Returns false only if the
 /// function returned `false` without waiting.
 fn startTask(self: *Runtime, name: []const u8, surface: u64) bool {
+    return self.startTaskEvent(name, surface, null);
+}
+
+fn startTaskEvent(self: *Runtime, name: []const u8, surface: u64, event: ?Event) bool {
     const L = self.lua;
 
     // Each task runs in its own coroutine, so it can wait. The registry
@@ -449,8 +495,90 @@ fn startTask(self: *Runtime, name: []const u8, surface: u64) bool {
 
     // args. Keybinds and the command palette give no arguments.
     c.lua_createtable(co, 0, 0);
+    if (event) |e| {
+        inline for (.{ "title", "pwd", "name" }) |field| {
+            if (@field(e, field)) |v| {
+                _ = c.lua_pushlstring(co, v.ptr, v.len);
+                c.lua_setfield(co, -2, field);
+            }
+        }
+        if (e.session_id) |v| {
+            c.lua_pushinteger(co, @bitCast(v));
+            c.lua_setfield(co, -2, "session_id");
+        }
+        if (e.exit_code) |v| {
+            c.lua_pushinteger(co, v);
+            c.lua_setfield(co, -2, "exit_code");
+        }
+        if (e.duration) |v| {
+            c.lua_pushnumber(co, v);
+            c.lua_setfield(co, -2, "duration");
+        }
+    }
 
     return self.resumeTask(id, 2);
+}
+
+/// Copy event data now; dispatch after GTK finishes the current mutation.
+pub fn emit(self: *Runtime, event: Event) void {
+    if (self.retired) return;
+    const interested = for (self.subscriptions.items) |sub| {
+        if (sub.kind == event.kind) break true;
+    } else false;
+    if (!interested) return;
+    if (self.events.items.len >= 1024) {
+        log.warn("Lua event queue full; dropping {t}", .{event.kind});
+        return;
+    }
+    var copy = event;
+    copy.title = null;
+    copy.pwd = null;
+    copy.name = null;
+    self.events.ensureUnusedCapacity(self.alloc, 1) catch return;
+    inline for (.{ "title", "pwd", "name" }) |field| {
+        if (@field(event, field)) |v| {
+            @field(copy, field) = self.alloc.dupe(u8, v) catch {
+                copy.deinit(self.alloc);
+                return;
+            };
+        }
+    }
+    self.events.appendAssumeCapacity(copy);
+    if (!self.dispatching) self.armEvents();
+}
+
+fn armEvents(self: *Runtime) void {
+    if (self.retired or self.events.items.len == 0 or self.event_wait != null) return;
+    const id = self.nextId();
+    self.event_wait = self.host.timer(self.host.ptr, .{ .runtime = self, .id = id }, 1) catch {
+        for (self.events.items) |e| e.deinit(self.alloc);
+        self.events.clearRetainingCapacity();
+        self.event_handler = 0;
+        return;
+    };
+    self.event_id = id;
+}
+
+fn dispatchEvents(self: *Runtime) void {
+    if (self.retired or self.events.items.len == 0) return;
+    self.dispatching = true;
+    defer self.dispatching = false;
+    const event = self.events.items[0];
+    // Run at most one handler per tick, so a burst cannot monopolize GTK.
+    while (self.event_handler < self.subscriptions.items.len) {
+        const sub = self.subscriptions.items[self.event_handler];
+        self.event_handler += 1;
+        if (sub.kind != event.kind) continue;
+        _ = c.lua_rawgeti(self.lua, c.LUA_REGISTRYINDEX, sub.ref);
+        _ = self.startTaskEvent(@tagName(event.kind), event.surface, event);
+        break;
+    }
+    if (self.event_handler == self.subscriptions.items.len) {
+        const done = self.events.orderedRemove(0);
+        done.deinit(self.alloc);
+        self.event_handler = 0;
+    }
+    self.armEvents();
 }
 
 /// Resume the task `id` with `nargs` values on its stack. Returns false
@@ -611,6 +739,8 @@ fn installApi(self: *Runtime) void {
         .{ "after", luaAfter },
         .{ "every", luaEvery },
         .{ "cancel", luaCancel },
+        .{ "on", luaOn },
+        .{ "status", luaStatus },
     };
     inline for (functions) |entry| {
         c.lua_pushcclosure(L, entry[1], 0);
@@ -685,6 +815,52 @@ fn luaAction(L: ?*c.lua_State) callconv(.c) c_int {
 pub fn relaunchAllowed(self: *const Runtime, program: []const u8) bool {
     for (self.relaunch_programs.items) |name| if (std.mem.eql(u8, name, program)) return true;
     return false;
+}
+
+fn luaOn(L: ?*c.lua_State) callconv(.c) c_int {
+    const self = fromState(L);
+    if (!self.loading) return c.luaL_error(L, "ghostty.on works only while init.lua loads");
+    const name = checkString(L, 1);
+    const kind = std.meta.stringToEnum(Event.Kind, name) orelse
+        return c.luaL_error(L, "ghostty.on: unknown event");
+    c.luaL_checktype(L, 2, c.LUA_TFUNCTION);
+    if (self.subscriptions.items.len >= 128) return c.luaL_error(L, "ghostty.on: at most 128 handlers");
+    self.subscriptions.ensureUnusedCapacity(self.alloc, 1) catch return c.luaL_error(L, "out of memory");
+    c.lua_pushvalue(L, 2);
+    self.subscriptions.appendAssumeCapacity(.{ .kind = kind, .ref = c.luaL_ref(L, c.LUA_REGISTRYINDEX) });
+    return 0;
+}
+
+/// ghostty.status(text | nil, { surface? }) -> true | nil, error
+fn validStatusText(text: []const u8) bool {
+    if (text.len > 256 or !std.unicode.utf8ValidateSlice(text) or
+        std.mem.count(u8, text, "\n") > 1) return false;
+    for (text) |ch| if (std.ascii.isControl(ch) and ch != '\n') return false;
+    return true;
+}
+
+fn luaStatus(L: ?*c.lua_State) callconv(.c) c_int {
+    const self = fromState(L);
+    const text: [:0]const u8 = if (c.lua_type(L, 1) <= c.LUA_TNIL) "" else checkString(L, 1);
+    if (!validStatusText(text))
+        return c.luaL_argerror(L, 1, "expected at most two lines and 256 UTF-8 bytes, without other control characters");
+    var surface = self.surface;
+    if (c.lua_type(L, 2) > c.LUA_TNIL) {
+        c.luaL_checktype(L, 2, c.LUA_TTABLE);
+        if (c.lua_getfield(L, 2, "surface") > c.LUA_TNIL) surface = @bitCast(c.luaL_checkinteger(L, -1));
+        c.lua_settop(L, -2);
+    }
+    if (self.retired) return pushError(L, "Lua runtime was replaced");
+    if (self.loading and surface != 0) return pushError(L, "pane status is unavailable while init.lua loads");
+    if (surface == 0) {
+        const copy = self.alloc.dupeSentinel(u8, text, 0) catch return pushError(L, "out of memory");
+        if (self.default_status) |old| self.alloc.free(old);
+        self.default_status = copy;
+    }
+    if (!self.loading and !self.host.status(self.host.ptr, surface, text))
+        return pushError(L, "no window for that surface");
+    c.lua_pushboolean(L, 1);
+    return 1;
 }
 
 pub fn relaunchArguments(self: *const Runtime, program: []const u8) ?[]const []const u8 {
@@ -1311,6 +1487,7 @@ fn popError(L: ?*c.lua_State) [:0]const u8 {
 const TestHost = struct {
     invoked: ?[]const u8 = null,
     toasts: usize = 0,
+    status_surface: u64 = 0,
 
     /// The last `open` call, with copies of its strings.
     opened: ?struct {
@@ -1342,6 +1519,7 @@ const TestHost = struct {
             .exec = exec,
             .pick = pick,
             .timer = timer,
+            .status = status,
         };
     }
 
@@ -1438,6 +1616,14 @@ const TestHost = struct {
         self.last_toast = @splat(0);
         const len = @min(text.len, self.last_toast.len - 1);
         @memcpy(self.last_toast[0..len], text[0..len]);
+    }
+
+    fn status(ptr: *anyopaque, surface: u64, text: [:0]const u8) bool {
+        const self: *TestHost = @ptrCast(@alignCast(ptr));
+        self.status_surface = surface;
+        if (surface == 999) return false;
+        toast(ptr, 0, text);
+        return true;
     }
 };
 
@@ -1554,6 +1740,104 @@ test "session relaunch commands resume latest without retaining original prompts
     const fresh = try create(t.allocator, host.host());
     defer fresh.destroy();
     try t.expect(fresh.relaunchArguments("codex") == null);
+}
+
+test "Lua events copy snapshots, isolate errors and allow waiting" {
+    const t = std.testing;
+    var host: TestHost = .{};
+    const rt = try create(t.allocator, host.host());
+    defer rt.destroy();
+    try testLoad(rt,
+        \\assert(not pcall(ghostty.on, "unknown", function() end))
+        \\ghostty.on("title_changed", function(ctx, e)
+        \\  assert(ctx.surface == 42 and e.title == "old")
+        \\  error("handler failure")
+        \\end)
+        \\ghostty.on("title_changed", function(ctx, e)
+        \\  assert(e.title == "old" and e.pwd == "/tmp")
+        \\  assert(ghostty.sleep(0.1))
+        \\  ghostty.toast(e.title .. ctx.surface)
+        \\end)
+        \\ghostty.on("command_finished", function(ctx, e)
+        \\  assert(e.exit_code == 0 and e.duration == 2.5)
+        \\  ghostty.toast("finished")
+        \\end)
+        \\ghostty.on("session_opened", function(ctx, e)
+        \\  assert(e.session_id == 123 and e.name == "saved")
+        \\  ghostty.toast("opened")
+        \\end)
+    );
+    var title = [_]u8{ 'o', 'l', 'd' };
+    rt.emit(.{ .kind = .title_changed, .surface = 42, .title = &title, .pwd = "/tmp" });
+    title[0] = 'x';
+    try t.expectEqual(@as(usize, 0), host.toasts);
+    while (rt.event_id) |id| rt.complete(id, .timer);
+    try t.expectEqual(@as(usize, 1), host.toasts);
+    try t.expectEqual(@as(usize, 1), rt.tasks.count());
+    var task_ids = rt.tasks.keyIterator();
+    rt.complete(task_ids.next().?.*, .timer);
+    try t.expectEqualStrings("old42", host.lastToast());
+    rt.emit(.{ .kind = .command_finished, .surface = 42, .exit_code = 0, .duration = 2.5 });
+    rt.emit(.{ .kind = .session_opened, .session_id = 123, .name = "saved" });
+    while (rt.event_id) |id| rt.complete(id, .timer);
+    try t.expectEqualStrings("opened", host.lastToast());
+    try t.expectEqual(@as(usize, 0), rt.tasks.count());
+    rt.retired = true;
+    rt.emit(.{ .kind = .title_changed });
+    try t.expect(rt.event_id == null);
+}
+
+test "Lua events cancel queued delivery on destroy and stop retired dispatch" {
+    const t = std.testing;
+    var host: TestHost = .{};
+    const rt = try create(t.allocator, host.host());
+    try testLoad(rt,
+        \\ghostty.on("surface_closed", function(ctx, e) ghostty.toast(e.title) end)
+    );
+    rt.emit(.{ .kind = .surface_closed, .surface = 42, .title = "closed" });
+    rt.retired = true;
+    rt.complete(rt.event_id.?, .timer);
+    try t.expectEqual(@as(usize, 0), host.toasts);
+    rt.retired = false;
+    rt.emit(.{ .kind = .surface_closed, .surface = 42, .title = "closed" });
+    rt.destroy();
+    try t.expectEqual(@as(usize, 1), host.cancels);
+}
+
+test "Lua status loads defaults, targets windows and validates text" {
+    const t = std.testing;
+    var host: TestHost = .{};
+    const rt = try create(t.allocator, host.host());
+    defer rt.destroy();
+    try testLoad(rt,
+        \\assert(ghostty.status("Friday\n12:34"))
+        \\assert(not pcall(ghostty.status, "one\ntwo\nthree"))
+        \\assert(not pcall(ghostty.status, "bad\ttext"))
+        \\assert(not pcall(ghostty.status, "bad\rtext"))
+        \\assert(ghostty.status("12:34"))
+        \\assert(not pcall(ghostty.status, string.rep("x", 257)))
+        \\assert(ghostty.status("unavailable", { surface = 42 }) == nil)
+        \\ghostty.action{ name = "pane_status", run = function()
+        \\  assert(ghostty.status("Tests passed"))
+        \\end }
+        \\ghostty.action{ name = "all_status", run = function()
+        \\  assert(ghostty.status("Clock", { surface = 0 }))
+        \\  assert(ghostty.status("Gone", { surface = 999 }) == nil)
+        \\end }
+        \\ghostty.action{ name = "clear", run = function() assert(ghostty.status(nil, { surface = 0 })) end }
+    );
+    try t.expectEqualStrings("12:34", rt.default_status.?);
+    try t.expectEqual(@as(usize, 0), host.toasts);
+    try t.expect(rt.run("pane_status", 42));
+    try t.expectEqual(@as(u64, 42), host.status_surface);
+    try t.expectEqualStrings("Tests passed", host.lastToast());
+    try t.expectEqualStrings("12:34", rt.default_status.?);
+    try t.expect(rt.run("all_status", 42));
+    try t.expectEqualStrings("Clock", rt.default_status.?);
+    try t.expect(rt.run("clear", 42));
+    try t.expectEqualStrings("", rt.default_status.?);
+    try t.expectEqualStrings("", host.lastToast());
+    try t.expectEqual(@as(usize, 0), rt.tasks.count());
 }
 
 test "run returns false when a bound function returns false" {

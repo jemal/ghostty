@@ -346,6 +346,7 @@ pub const Window = extern struct {
         replacing_session: bool = false,
         session_surface_pending: bool = false,
         session_restore_pending: bool = false,
+        session_opened_pending: bool = false,
         toolbar_visible_override: ?bool = null,
 
         theme: ThemePicker.State = .{},
@@ -358,6 +359,8 @@ pub const Window = extern struct {
         toolbar: *adw.ToolbarView,
         toast_overlay: *adw.ToastOverlay,
         session_label: *gtk.Label,
+        session_status: *gtk.Label,
+        header_status: *gtk.Label,
 
         pub var offset: c_int = 0;
     };
@@ -449,6 +452,7 @@ pub const Window = extern struct {
         priv.session_id = sessions.newId(global.io());
         var name_buf: [sessions.max_haiku_name_bytes]u8 = undefined;
         self.setSessionName(sessions.haikuName(&name_buf, priv.session_id));
+        self.setLuaStatus(Application.default().defaultLuaStatus());
 
         // We need to do this so that the title initializes properly,
         // I think because its a dynamic getter.
@@ -1321,6 +1325,7 @@ pub const Window = extern struct {
             surface.grabFocus();
         }
         app.saveSessions();
+        self.emitSessionOpened();
     }
 
     fn restoreSessionNode(widget: *SplitTree, session_id: u64, nodes: []const sessions.Node, index: u32) std.mem.Allocator.Error!Surface.Tree {
@@ -1367,6 +1372,34 @@ pub const Window = extern struct {
                 defer right.deinit();
                 return left.split(alloc, .root, if (split.layout == .horizontal) .right else .down, @floatCast(split.ratio), &right);
             },
+        }
+    }
+
+    pub fn emitSessionOpened(self: *Self) void {
+        self.setLuaStatus(Application.default().defaultLuaStatus());
+        self.private().session_opened_pending = true;
+        self.flushSessionOpened();
+    }
+
+    pub fn flushSessionOpened(self: *Self) void {
+        if (!self.private().session_opened_pending) return;
+        const active = self.getActiveSurface() orelse return;
+        const surface = active.core() orelse return;
+        self.private().session_opened_pending = false;
+        Application.default().emitLuaEvent(.{
+            .kind = .session_opened,
+            .surface = surface.id,
+            .session_id = self.sessionId(),
+            .name = self.private().session_name,
+        });
+    }
+
+    pub fn setLuaStatus(self: *Self, text: [:0]const u8) void {
+        const priv = self.private();
+        for ([_]*gtk.Label{ priv.session_status, priv.header_status }) |label| {
+            label.setLabel(text);
+            label.as(gtk.Widget).setTooltipText(if (text.len > 0) text else null);
+            label.as(gtk.Widget).setVisible(@intFromBool(text.len > 0));
         }
     }
 
@@ -1938,14 +1971,10 @@ pub const Window = extern struct {
         return @intFromBool(style == .tabs and compact == 0);
     }
 
-    fn closureCompactTabControls(_: *Self, style: TitlebarStyle, compact: c_int) callconv(.c) c_int {
-        return @intFromBool(style == .tabs and compact != 0);
-    }
-
     /// The width of the session name in the header, in characters. Every
     /// haiku name (`sessions.max_haiku_name_bytes`) fits without ellipsis.
     fn closureSessionNameWidth(_: *Self, compact: c_int) callconv(.c) c_int {
-        return if (compact != 0) 15 else 20;
+        return if (compact != 0) 24 else 20;
     }
 
     pub fn setTitleOverride(self: *Self, title: ?[]const u8) void {
@@ -3013,6 +3042,8 @@ pub const Window = extern struct {
             class.bindTemplateChildPrivate("toolbar", .{});
             class.bindTemplateChildPrivate("toast_overlay", .{});
             class.bindTemplateChildPrivate("session_label", .{});
+            class.bindTemplateChildPrivate("session_status", .{});
+            class.bindTemplateChildPrivate("header_status", .{});
 
             // Template Callbacks
             class.bindTemplateCallback("realize", &windowRealize);
@@ -3036,7 +3067,6 @@ pub const Window = extern struct {
             class.bindTemplateCallback("notify_scale_factor", &propScaleFactor);
             class.bindTemplateCallback("titlebar_style_is_tabs", &closureTitlebarStyleIsTab);
             class.bindTemplateCallback("native_tab_controls", &closureNativeTabControls);
-            class.bindTemplateCallback("compact_tab_controls", &closureCompactTabControls);
             class.bindTemplateCallback("session_name_width", &closureSessionNameWidth);
             class.bindTemplateCallback("computed_title", &closureTitle);
             class.bindTemplateCallback("computed_subtitle", &closureSubtitle);

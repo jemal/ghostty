@@ -207,10 +207,13 @@ compact mode respects `gtk-wide-tabs`.
 
 The style works with top or bottom tabs, inverted close buttons, and either
 GTK titlebar style. Native tab selection, close buttons, dragging, overflow,
-and overview remain available. For a single row of tabs and window controls,
-combine it with `gtk-titlebar-style = tabs`. This uses a single new-tab button
-on the right and moves overview and split actions into the main menu, giving
-tabs more room. Long session names are shortened in the strip and remain fully
+and overview actions remain available. For a single row focused on session
+status and tabs, combine it with `gtk-titlebar-style = tabs`. Compact mode
+hides the new-tab/menu/window-control strip and places the session name beside
+an optional Lua status block (up to two lines), separated from it and the tabs
+by short dividers. Keyboard shortcuts and the
+command palette provide tab and split actions; native tab styling retains the
+controls. Long session names are shortened in the strip and remain fully
 visible in their tooltip. Tab tooltips show the full title and working
 directory, including when the title fades to fit the available width.
 

@@ -581,6 +581,7 @@ pub const Surface = extern struct {
         session_snapshot_path: ?[:0]u8 = null,
         session_snapshot_bytes: ?[]u8 = null,
         session_relaunch: ?session_relaunch.Record = null,
+        lua_closed: bool = false,
         relaunch_idle: ?c_uint = null,
         relaunch_timeout: ?c_uint = null,
         /// The configuration that this surface is using.
@@ -1171,6 +1172,7 @@ pub const Surface = extern struct {
     }
 
     pub fn commandFinished(self: *Self, value: apprt.Action.Value(.command_finished)) bool {
+        self.emitLuaEvent(.command_finished, value);
         const app = Application.default();
         const alloc = app.allocator();
         const priv: *Private = self.private();
@@ -1943,6 +1945,10 @@ pub const Surface = extern struct {
     }
 
     fn dispose(self: *Self) callconv(.c) void {
+        if (!self.private().lua_closed) {
+            self.private().lua_closed = true;
+            self.emitLuaEvent(.surface_closed, null);
+        }
         self.cancelSessionRelaunch();
         if (Application.default().picker()) |service| service.cancelSurface(self, "pane_closed");
         const priv = self.private();
@@ -2169,10 +2175,15 @@ pub const Surface = extern struct {
     /// title. For manually set titles see `setTitleOverride`.
     pub fn setTitle(self: *Self, title: ?[:0]const u8) void {
         const priv = self.private();
+        const changed = if (priv.title) |old|
+            if (title) |value| !std.mem.eql(u8, old, value) else true
+        else
+            title != null;
         if (priv.title) |v| glib.free(@ptrCast(@constCast(v)));
         priv.title = null;
         if (title) |v| priv.title = glib.ext.dupeZ(u8, v);
         self.as(gobject.Object).notifyByPspec(properties.title.impl.param_spec);
+        if (changed) self.emitLuaEvent(.title_changed, null);
     }
 
     /// Overridden title. This will be generally be shown over the title
@@ -2188,6 +2199,18 @@ pub const Surface = extern struct {
     /// Returns the pwd property without a copy.
     pub fn getPwd(self: *Self) ?[:0]const u8 {
         return self.private().pwd;
+    }
+
+    fn emitLuaEvent(self: *Self, kind: @import("../lua.zig").Runtime.Event.Kind, command: ?apprt.Action.Value(.command_finished)) void {
+        const surface = self.core() orelse return;
+        Application.default().emitLuaEvent(.{
+            .kind = kind,
+            .surface = surface.id,
+            .title = self.getTitle(),
+            .pwd = self.getPwd(),
+            .exit_code = if (command) |v| v.exit_code else null,
+            .duration = if (command) |v| @as(f64, @floatFromInt(v.duration.duration)) / std.time.ns_per_s else null,
+        });
     }
 
     /// An unmapped tab may not have initialized its terminal or reported a
@@ -2336,10 +2359,15 @@ pub const Surface = extern struct {
     /// Set the pwd for this surface, copies the value.
     pub fn setPwd(self: *Self, pwd: ?[:0]const u8) void {
         const priv = self.private();
+        const changed = if (priv.pwd) |old|
+            if (pwd) |value| !std.mem.eql(u8, old, value) else true
+        else
+            pwd != null;
         if (priv.pwd) |v| glib.free(@ptrCast(@constCast(v)));
         priv.pwd = null;
         if (pwd) |v| priv.pwd = glib.ext.dupeZ(u8, v);
         self.as(gobject.Object).notifyByPspec(properties.pwd.impl.param_spec);
+        if (changed) self.emitLuaEvent(.pwd_changed, null);
     }
 
     /// Returns the focus state of this surface.
@@ -3798,6 +3826,7 @@ pub const Surface = extern struct {
 
         // Store it!
         priv.core_surface = surface;
+        self.emitLuaEvent(.surface_created, null);
         priv.desktop_notifications = .init(surface.id);
 
         // Give the render surface a pointer to the core surface so it
@@ -3822,6 +3851,7 @@ pub const Surface = extern struct {
         );
 
         self.updateFocus(priv.focused);
+        if (ext.getAncestor(Window, self.as(gtk.Widget))) |window| window.flushSessionOpened();
     }
 
     fn resizeOverlaySchedule(self: *Self) void {

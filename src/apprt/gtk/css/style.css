@@ -108,7 +108,7 @@ window.ssd.no-border-radius {
 
 .window tabbar.compact-tabs .session-selector {
   min-height: 26px;
-  padding: 0 6px;
+  padding: 0 10px;
   border-radius: 28px;
   font-weight: 500;
   background: transparent;
@@ -117,6 +117,20 @@ window.ssd.no-border-radius {
 .window tabbar.compact-tabs .session-selector:hover,
 .window tabbar.compact-tabs .session-selector:checked {
   background: color-mix(in srgb, currentColor 12%, transparent);
+}
+
+.window .session-selector .session-name {
+  font-size: 1.05em;
+  font-weight: 600;
+}
+
+.window .session-status {
+  font-size: 0.85em;
+  font-weight: 400;
+}
+
+.window .session-divider {
+  opacity: 0.45;
 }
 
 @media (prefers-contrast: more) {
