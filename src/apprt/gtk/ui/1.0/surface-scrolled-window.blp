@@ -3,14 +3,44 @@ using Adw 1;
 
 template $GhostttySurfaceScrolledWindow: Adw.Bin {
   notify::surface => $notify_surface();
+  notify::config => $refresh_decoration();
+  map => $refresh_decoration();
   // The double-nesting is required due to a GTK bug where you can't
   // bind the first child of a builder layout. If you do, you get a double
   // dispose. Easiest way to see that is simply remove this and see the
   // GTK critical errors (and sometimes crashes).
   Adw.Bin {
-    Gtk.ScrolledWindow scrolled_window {
-      hscrollbar-policy: never;
-      vscrollbar-policy: bind $scrollbar_policy(template.config) as <Gtk.PolicyType>;
+    Gtk.Box pane_frame {
+      orientation: vertical;
+      overflow: hidden;
+
+      Gtk.Box pane_header {
+        styles ["pane-titlebar"]
+        visible: false;
+        Gtk.Button {
+          styles ["flat"]
+          hexpand: true;
+          focus-on-click: false;
+          clicked => $focus_pane();
+          child: Gtk.Label pane_title {
+            label: _("Terminal");
+            ellipsize: end;
+            xalign: 0;
+          };
+        }
+        Gtk.Button {
+          styles ["flat"]
+          icon-name: "window-close-symbolic";
+          tooltip-text: _("Close terminal");
+          focus-on-click: false;
+          clicked => $close_pane();
+        }
+      }
+      Gtk.ScrolledWindow scrolled_window {
+        vexpand: true;
+        hscrollbar-policy: never;
+        vscrollbar-policy: bind $scrollbar_policy(template.config) as <Gtk.PolicyType>;
+      }
     }
   }
 }

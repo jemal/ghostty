@@ -71,11 +71,11 @@ template $GhosttyWindow: Adw.ApplicationWindow {
         Gtk.Box {
           spacing: 6;
           Gtk.Label header_status {
-            styles ["dim-label", "session-status"]
+            styles ["session-status"]
             visible: false;
             ellipsize: end;
-            lines: 2;
-            max-width-chars: 24;
+            single-line-mode: true;
+            max-width-chars: 48;
           }
           Gtk.ToggleButton {
             icon-name: "view-grid-symbolic";
@@ -118,52 +118,29 @@ template $GhosttyWindow: Adw.ApplicationWindow {
             action-name: "win.switch-session";
             focus-on-click: false;
             tooltip-text: bind template.session-name;
-            can-focus: false;
+            focusable: true;
 
             child: Gtk.Box {
-              spacing: 6;
-              // Fit the name, with a cap for long custom names. Unsaved names
-              // start dimmed; the window removes "dim-label" on save.
-              Gtk.Label session_label {
-                styles ["dim-label", "session-name"]
-                label: bind template.session-name;
-                ellipsize: end;
-                xalign: 0;
-                max-width-chars: bind $session_name_width(template.tabs-compact) as <int>;
+              Gtk.Image session_icon {
+                styles ["dim-label"]
+                pixel-size: 20;
+              }
+              Gtk.Revealer session_name_revealer {
+                reveal-child: true;
+                transition-type: slide_right;
+                transition-duration: 160;
+                // Fit the name, with a cap for long custom names. Unsaved names
+                // start dimmed; the window removes "dim-label" on save.
+                Gtk.Label session_label {
+                  styles ["dim-label", "session-name"]
+                  label: bind template.session-name;
+                  margin-start: 9;
+                  ellipsize: end;
+                  xalign: 0;
+                  max-width-chars: bind $session_name_width(template.tabs-compact) as <int>;
+                }
               }
             };
-          }
-
-          Gtk.Box {
-            visible: bind session_status.visible;
-            valign: center;
-
-            Gtk.Separator {
-              styles ["session-divider"]
-              visible: bind template.session-enabled;
-              orientation: vertical;
-              height-request: 16;
-              margin-start: 6;
-              margin-end: 10;
-            }
-            Gtk.Label session_status {
-              styles ["dim-label", "session-status"]
-              visible: false;
-              ellipsize: end;
-              lines: 2;
-              xalign: 0;
-              max-width-chars: 28;
-            }
-          }
-
-          Gtk.Separator {
-            styles ["session-divider"]
-            visible: bind template.session-enabled;
-            orientation: vertical;
-            valign: center;
-            height-request: 24;
-            margin-start: 12;
-            margin-end: 8;
           }
 
           Adw.SplitButton {
@@ -185,35 +162,42 @@ template $GhosttyWindow: Adw.ApplicationWindow {
         [end]
         Gtk.Box {
           orientation: horizontal;
-          visible: bind $native_tab_controls(template.titlebar-style, template.tabs-compact) as <bool>;
 
-          Gtk.ToggleButton {
+          Gtk.Label session_status {
+            styles ["session-status", "tabbar-status"]
+            visible: false;
+            valign: center;
+            ellipsize: end;
+            single-line-mode: true;
+            xalign: 1;
+            max-width-chars: 48;
+          }
+
+          Gtk.Box {
+            orientation: horizontal;
             visible: bind $native_tab_controls(template.titlebar-style, template.tabs-compact) as <bool>;
-            styles [
-              "flat",
-            ]
 
-            icon-name: "view-grid-symbolic";
-            tooltip-text: _("View Open Tabs");
-            active: bind tab_overview.open bidirectional;
-            can-focus: false;
-            focus-on-click: false;
-          }
+            Gtk.ToggleButton {
+              styles ["flat"]
+              icon-name: "view-grid-symbolic";
+              tooltip-text: _("View Open Tabs");
+              active: bind tab_overview.open bidirectional;
+              can-focus: false;
+              focus-on-click: false;
+            }
 
-          Gtk.MenuButton {
-            styles [
-              "flat",
-            ]
+            Gtk.MenuButton {
+              styles ["flat"]
+              notify::active => $notify_menu_active();
+              icon-name: "open-menu-symbolic";
+              menu-model: main_menu;
+              tooltip-text: _("Main Menu");
+              can-focus: false;
+            }
 
-            notify::active => $notify_menu_active();
-            icon-name: "open-menu-symbolic";
-            menu-model: main_menu;
-            tooltip-text: _("Main Menu");
-            can-focus: false;
-          }
-
-          Gtk.WindowControls {
-            side: end;
+            Gtk.WindowControls {
+              side: end;
+            }
           }
         }
       }

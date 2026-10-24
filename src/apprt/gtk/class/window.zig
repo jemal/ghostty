@@ -348,6 +348,13 @@ pub const Window = extern struct {
         session_restore_pending: bool = false,
         session_opened_pending: bool = false,
         toolbar_visible_override: ?bool = null,
+        pane_decorations_override: ?bool = null,
+        session_name_timer: ?c_uint = null,
+        session_hovered: bool = false,
+        session_focused: bool = false,
+        session_dialogs: ?*gio.ListModel = null,
+        session_dialogs_handler: c_ulong = 0,
+        disposing: bool = false,
 
         theme: ThemePicker.State = .{},
         theme_overlay: *gtk.Overlay,
@@ -359,6 +366,9 @@ pub const Window = extern struct {
         toolbar: *adw.ToolbarView,
         toast_overlay: *adw.ToastOverlay,
         session_label: *gtk.Label,
+        session_button: *gtk.Button,
+        session_icon: *gtk.Image,
+        session_name_revealer: *gtk.Revealer,
         session_status: *gtk.Label,
         header_status: *gtk.Label,
 
@@ -427,6 +437,20 @@ pub const Window = extern struct {
         // Set our window icon. We can't set this in the blueprint file
         // because its dependent on the build config.
         self.as(gtk.Window).setIconName(build_config.bundle_id);
+        priv.session_icon.setFromIconName(build_config.bundle_id);
+        const motion = gtk.EventControllerMotion.new();
+        _ = gtk.EventControllerMotion.signals.enter.connect(motion, *Self, sessionEnter, self, .{});
+        _ = gtk.EventControllerMotion.signals.leave.connect(motion, *Self, sessionLeave, self, .{});
+        priv.session_button.as(gtk.Widget).addController(motion.as(gtk.EventController));
+        const focus = gtk.EventControllerFocus.new();
+        _ = gtk.EventControllerFocus.signals.enter.connect(focus, *Self, sessionFocusEnter, self, .{});
+        _ = gtk.EventControllerFocus.signals.leave.connect(focus, *Self, sessionFocusLeave, self, .{});
+        priv.session_button.as(gtk.Widget).addController(focus.as(gtk.EventController));
+        _ = gtk.Widget.signals.map.connect(priv.session_button.as(gtk.Widget), *Self, sessionMapped, self, .{});
+        const dialogs = self.as(adw.ApplicationWindow).getDialogs();
+        _ = dialogs.ref();
+        priv.session_dialogs = dialogs;
+        priv.session_dialogs_handler = gio.ListModel.signals.items_changed.connect(dialogs, *Self, sessionDialogsChanged, self, .{});
 
         // Initialize our actions
         self.initActionMap();
@@ -737,6 +761,86 @@ pub const Window = extern struct {
         if (self.getActiveSurface()) |surface| surface.grabFocus();
     }
 
+    pub fn getPaneDecorations(self: *Self) bool {
+        const priv = self.private();
+        return priv.pane_decorations_override orelse
+            if (priv.config) |config| config.get().@"gtk-pane-decorations" else false;
+    }
+
+    pub fn togglePaneDecorations(self: *Self) void {
+        self.private().pane_decorations_override = !self.getPaneDecorations();
+        self.refreshPaneDecorations();
+        if (self.getActiveSurface()) |surface| surface.grabFocus();
+    }
+
+    fn refreshPaneDecorations(self: *Self) void {
+        self.syncPaneDecorationStyle();
+        const Wrapper = @import("surface_scrolled_window.zig").SurfaceScrolledWindow;
+        for (Application.default().core().surfaces.items) |rt_surface| {
+            const widget = rt_surface.gobj().as(gtk.Widget);
+            if (ext.getAncestor(Self, widget) != self) continue;
+            if (ext.getAncestor(Wrapper, widget)) |wrapper| wrapper.refreshDecoration();
+        }
+    }
+
+    fn syncPaneDecorationStyle(self: *Self) void {
+        const widget = self.as(gtk.Widget);
+        if (self.getPaneDecorations()) widget.addCssClass("pane-decorations") else widget.removeCssClass("pane-decorations");
+    }
+
+    fn stopSessionNameTimer(self: *Self) void {
+        if (self.private().session_name_timer) |timer| {
+            _ = glib.Source.remove(timer);
+            self.private().session_name_timer = null;
+        }
+    }
+
+    pub fn revealSessionName(self: *Self) void {
+        if (self.private().disposing) return;
+        self.stopSessionNameTimer();
+        self.private().session_name_revealer.setRevealChild(1);
+        self.private().session_name_timer = glib.timeoutAdd(3000, collapseSessionName, self);
+    }
+
+    fn collapseSessionName(data: ?*anyopaque) callconv(.c) c_int {
+        const self: *Self = @ptrCast(@alignCast(data orelse return 0));
+        const priv = self.private();
+        // Any modal dialog holds the expanded name, including the Sessions
+        // overlay and nested rename/confirmation dialogs.
+        if (priv.session_hovered or priv.session_focused or self.as(adw.ApplicationWindow).getDialogs().getNItems() > 0) return 1;
+        priv.session_name_timer = null;
+        priv.session_name_revealer.setRevealChild(0);
+        return 0;
+    }
+
+    fn sessionMapped(_: *gtk.Widget, self: *Self) callconv(.c) void {
+        self.revealSessionName();
+    }
+
+    fn sessionDialogsChanged(_: *gio.ListModel, _: c_uint, _: c_uint, _: c_uint, self: *Self) callconv(.c) void {
+        self.revealSessionName();
+    }
+
+    fn sessionEnter(_: *gtk.EventControllerMotion, _: f64, _: f64, self: *Self) callconv(.c) void {
+        self.private().session_hovered = true;
+        self.revealSessionName();
+    }
+
+    fn sessionLeave(_: *gtk.EventControllerMotion, self: *Self) callconv(.c) void {
+        self.private().session_hovered = false;
+        self.revealSessionName();
+    }
+
+    fn sessionFocusEnter(_: *gtk.EventControllerFocus, self: *Self) callconv(.c) void {
+        self.private().session_focused = true;
+        self.revealSessionName();
+    }
+
+    fn sessionFocusLeave(_: *gtk.EventControllerFocus, self: *Self) callconv(.c) void {
+        self.private().session_focused = false;
+        self.revealSessionName();
+    }
+
     fn getToolbarVisible(self: *Self) bool {
         const priv = self.private();
         if (priv.toolbar_visible_override) |value| return value;
@@ -766,6 +870,7 @@ pub const Window = extern struct {
     fn syncAppearance(self: *Self) void {
         const priv = self.private();
         const widget = self.as(gtk.Widget);
+        self.syncPaneDecorationStyle();
 
         // Toggle style classes based on whether we're using CSDs or SSDs.
         //
@@ -1119,6 +1224,7 @@ pub const Window = extern struct {
         if (priv.session_name) |old| glib.free(@ptrCast(@constCast(old)));
         priv.session_name = glib.ext.dupeZ(u8, name);
         self.as(gobject.Object).notifyByPspec(properties.@"session-name".impl.param_spec);
+        self.revealSessionName();
     }
 
     /// All strings in the captured manifest belong to alloc.
@@ -1452,10 +1558,24 @@ pub const Window = extern struct {
 
     pub fn setLuaStatus(self: *Self, text: [:0]const u8) void {
         const priv = self.private();
+        // Lua accepts up to two lines. Present them as one quiet status line
+        // in the chrome; retain the original text in the tooltip.
+        var buffer: [512]u8 = undefined;
+        var stream: std.Io.Writer = .fixed(&buffer);
+        var lines = std.mem.splitScalar(u8, text, '\n');
+        var first = true;
+        while (lines.next()) |line| {
+            if (line.len == 0) continue;
+            if (!first) stream.writeAll(" · ") catch break;
+            stream.writeAll(line) catch break;
+            first = false;
+        }
+        stream.writeByte(0) catch return;
+        const display: [:0]const u8 = buffer[0 .. stream.end - 1 :0];
         for ([_]*gtk.Label{ priv.session_status, priv.header_status }) |label| {
-            label.setLabel(text);
+            label.setLabel(display);
             label.as(gtk.Widget).setTooltipText(if (text.len > 0) text else null);
-            label.as(gtk.Widget).setVisible(@intFromBool(text.len > 0));
+            label.as(gtk.Widget).setVisible(@intFromBool(display.len > 0));
         }
     }
 
@@ -1465,6 +1585,7 @@ pub const Window = extern struct {
 
     pub fn switchSession(self: *Self) bool {
         if (!Application.default().sessionsEnabled()) return false;
+        self.revealSessionName();
         @import("session_manager.zig").SessionManager.present(self);
         return true;
     }
@@ -1490,6 +1611,8 @@ pub const Window = extern struct {
         const priv = self.private();
         priv.session_saved = true;
         priv.session_label.as(gtk.Widget).removeCssClass("dim-label");
+        priv.session_icon.as(gtk.Widget).removeCssClass("dim-label");
+        self.revealSessionName();
         self.as(gobject.Object).notifyByPspec(properties.@"session-saved".impl.param_spec);
         self.as(gobject.Object).notifyByPspec(properties.@"toolbar-visible".impl.param_spec);
         self.as(gobject.Object).notifyByPspec(properties.@"tabs-autohide".impl.param_spec);
@@ -1847,6 +1970,9 @@ pub const Window = extern struct {
     ) callconv(.c) void {
         const priv = self.private();
         priv.toolbar_visible_override = null;
+        priv.pane_decorations_override = null;
+        self.refreshPaneDecorations();
+        self.revealSessionName();
         if (priv.config) |config_obj| {
             const config = config_obj.get();
             if (config.@"app-notifications".@"config-reload") {
@@ -2104,7 +2230,15 @@ pub const Window = extern struct {
 
     fn dispose(self: *Self) callconv(.c) void {
         const priv = self.private();
+        priv.disposing = true;
         priv.theme.deinit(self);
+        self.stopSessionNameTimer();
+        if (priv.session_dialogs) |dialogs| {
+            gobject.signalHandlerDisconnect(dialogs.as(gobject.Object), priv.session_dialogs_handler);
+            dialogs.unref();
+            priv.session_dialogs = null;
+            priv.session_dialogs_handler = 0;
+        }
 
         if (priv.handle_active_state_source) |v| {
             if (glib.Source.remove(v) == 0) {
@@ -3104,6 +3238,9 @@ pub const Window = extern struct {
             class.bindTemplateChildPrivate("toolbar", .{});
             class.bindTemplateChildPrivate("toast_overlay", .{});
             class.bindTemplateChildPrivate("session_label", .{});
+            class.bindTemplateChildPrivate("session_button", .{});
+            class.bindTemplateChildPrivate("session_icon", .{});
+            class.bindTemplateChildPrivate("session_name_revealer", .{});
             class.bindTemplateChildPrivate("session_status", .{});
             class.bindTemplateChildPrivate("header_status", .{});
 

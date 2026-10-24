@@ -48,15 +48,22 @@ and two lines (one newline, no other control characters). Returns `true`, or
 `nil, err` for a missing pane.
 This is window status: events from two panes in one window share that line.
 
-The combined tab titlebar uses a clickable session name, a short
-divider, a status block with up to two lines, then a divider before the tabs.
-Compact tabs omit the new-tab/menu/window-control strip. The session name fits
-its content up to 24 characters; status is capped at 28 characters of width.
-Native tab style retains its controls. Long text is ellipsized with a full
-tooltip. Empty status and its inner divider collapse. With a separate
-headerbar, status appears beside the header controls. Existing toolbar hiding
-rules still apply. Status is transient, resets on hard reload and session
-replacement, and is not written into session files.
+The combined tab titlebar has a flat Ghostty icon/session control on the left,
+tabs in the middle and quiet status text at the far right. The session name
+fits its content up to 24 characters and folds away after three idle seconds;
+hover, keyboard focus or opening the Sessions overlay reveals it again. The
+user requested this Rex-inspired refinement on 2026-10-24 after trying the
+pane decorations. It replaces the earlier session/status dividers and tiny
+two-line block on the left. The user approved the new layout on the normal
+desktop on 2026-10-24.
+Compact tabs omit the new-tab/menu/window-control strip; native tabs retain
+those controls. Status is capped at 48 characters of width and presented on
+one line, joining nonempty input lines with ` · `. The API still accepts two
+lines; the tooltip preserves the full original text. Empty status collapses.
+With a separate headerbar, status appears beside the header controls in the
+same single-line format. Existing toolbar hiding rules still apply. Status is
+transient, resets on hard reload and session replacement, and is not written
+into session files.
 
 Use Lua's local time and the existing timer API for a clock:
 
@@ -282,6 +289,11 @@ The model is the Lua API of Rex
 that call Lua functions, calls into the terminal, and work that waits without
 blocking the UI.
 
+Rex is also a UI inspiration for this fork. The approved 2026-10-23 UI follow-up
+and the Den implementation reference are documented in
+[UI_REFINEMENT_PLAN.md](UI_REFINEMENT_PLAN.md); that work is separate from the
+implemented Lua phases.
+
 The target use case is a script like this one: press a key, find the Cargo
 project of the focused pane, and open a target picker in a new split in the
 project root.
@@ -389,7 +401,7 @@ bound function shows as a toast and goes to the log.
 | `ghostty.pick{ surface?, title?, placeholder?, placement?, choices }` | Done in phase 3. Opens the native picker and waits for the choice. Returns the choice ID, or nil when the picker is cancelled. |
 | `ghostty.sleep(seconds)`, `ghostty.after(seconds, fn)`, `ghostty.every(seconds, fn)`, `ghostty.cancel(id)` | Done in phase 3. Timers. |
 | `ghostty.on(event, fn)` | Phase 4. Queued lifecycle handlers; see the events section above. |
-| `ghostty.status(text, { surface? })` | Window status below the session name; 0 updates all windows. |
+| `ghostty.status(text, { surface? })` | Window status at the right of the bar; 0 updates all windows. |
 
 ### ctx
 

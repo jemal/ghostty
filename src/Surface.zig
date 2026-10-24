@@ -5669,6 +5669,12 @@ pub fn performBindingAction(self: *Surface, action: input.Binding.Action) !bool 
             return false;
         },
 
+        .toggle_pane_decorations => {
+            if (comptime @hasDecl(apprt.Surface, "togglePaneDecorations"))
+                return self.rt_surface.togglePaneDecorations();
+            return false;
+        },
+
         .toggle_toolbar => {
             if (comptime @hasDecl(apprt.Surface, "toggleToolbar"))
                 return self.rt_surface.toggleToolbar();

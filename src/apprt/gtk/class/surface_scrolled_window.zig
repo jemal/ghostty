@@ -61,6 +61,10 @@ pub const SurfaceScrolledWindow = extern struct {
         config_binding: ?*gobject.Binding = null,
         surface: ?*Surface = null,
         scrolled_window: *gtk.ScrolledWindow,
+        pane_frame: *gtk.Box,
+        pane_header: *gtk.Box,
+        pane_title: *gtk.Label,
+        surface_handlers: [3]c_ulong = .{ 0, 0, 0 },
         pub var offset: c_int = 0;
     };
 
@@ -87,6 +91,8 @@ pub const SurfaceScrolledWindow = extern struct {
 
     fn dispose(self: *Self) callconv(.c) void {
         const priv = self.private();
+        self.disconnectSurface();
+        priv.surface = null;
 
         if (priv.config_binding) |binding| {
             binding.unbind();
@@ -144,7 +150,54 @@ pub const SurfaceScrolledWindow = extern struct {
         defer self.as(gobject.Object).thawNotify();
         self.as(gobject.Object).notifyByPspec(properties.surface.impl.param_spec);
 
+        self.disconnectSurface();
         priv.surface = surface_;
+    }
+
+    fn disconnectSurface(self: *Self) void {
+        const priv = self.private();
+        if (priv.surface) |surface| {
+            for (&priv.surface_handlers) |*handler| {
+                if (handler.* != 0) gobject.signalHandlerDisconnect(surface.as(gobject.Object), handler.*);
+                handler.* = 0;
+            }
+        }
+    }
+
+    /// Update presentation in place; the terminal stays in its scrolled window.
+    pub fn refreshDecoration(self: *Self) void {
+        const priv = self.private();
+        const ext = @import("../ext.zig");
+        const tiled = ext.getAncestor(@import("split_tree.zig").SplitTree, self.as(gtk.Widget)) != null;
+        const enabled = if (ext.getAncestor(@import("window.zig").Window, self.as(gtk.Widget))) |window|
+            tiled and window.getPaneDecorations()
+        else
+            false;
+        const frame = priv.pane_frame.as(gtk.Widget);
+        if (enabled) frame.addCssClass("decorated-pane") else frame.removeCssClass("decorated-pane");
+        priv.pane_header.as(gtk.Widget).setVisible(@intFromBool(enabled));
+        if (priv.surface) |surface| {
+            const title = surface.getEffectiveTitle() orelse "Terminal";
+            priv.pane_title.setLabel(title);
+            priv.pane_title.as(gtk.Widget).setTooltipText(title);
+            if (surface.getFocused()) frame.addCssClass("active") else frame.removeCssClass("active");
+        }
+    }
+
+    fn refreshDecorationCallback(self: *Self) callconv(.c) void {
+        self.refreshDecoration();
+    }
+
+    fn surfaceChanged(_: *Surface, _: *gobject.ParamSpec, self: *Self) callconv(.c) void {
+        self.refreshDecoration();
+    }
+
+    fn focusPane(_: *gtk.Button, self: *Self) callconv(.c) void {
+        if (self.private().surface) |surface| surface.grabFocus();
+    }
+
+    fn closePane(_: *gtk.Button, self: *Self) callconv(.c) void {
+        if (self.private().surface) |surface| surface.close();
     }
 
     fn closureScrollbarPolicy(
@@ -176,6 +229,9 @@ pub const SurfaceScrolledWindow = extern struct {
 
         // Bind config from surface to our config property
         if (priv.surface) |surface| {
+            inline for (.{ "title", "title-override", "focused" }, 0..) |detail, i| {
+                priv.surface_handlers[i] = gobject.Object.signals.notify.connect(surface, *Self, surfaceChanged, self, .{ .detail = detail });
+            }
             const binding = surface.as(gobject.Object).bindProperty(
                 properties.config.name,
                 self.as(gobject.Object),
@@ -214,6 +270,12 @@ pub const SurfaceScrolledWindow = extern struct {
             class.bindTemplateCallback("scrollbar_policy", &closureScrollbarPolicy);
             class.bindTemplateCallback("notify_surface", &propSurface);
             class.bindTemplateChildPrivate("scrolled_window", .{});
+            class.bindTemplateChildPrivate("pane_frame", .{});
+            class.bindTemplateChildPrivate("pane_header", .{});
+            class.bindTemplateChildPrivate("pane_title", .{});
+            class.bindTemplateCallback("refresh_decoration", &refreshDecorationCallback);
+            class.bindTemplateCallback("focus_pane", &focusPane);
+            class.bindTemplateCallback("close_pane", &closePane);
 
             // Properties
             gobject.ext.registerProperties(class, &.{

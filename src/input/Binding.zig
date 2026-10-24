@@ -602,6 +602,9 @@ pub const Action = union(enum) {
     /// Only supported by the GTK runtime.
     toggle_toolbar,
 
+    /// Toggle tiled pane frames and headers for this window (GTK only).
+    toggle_pane_decorations,
+
     /// Show or hide this tab's floating terminals (GTK only).
     toggle_float,
     /// Hide floating terminals and return to the tiled layout (GTK only).
@@ -1503,6 +1506,7 @@ pub const Action = union(enum) {
             .move_tab_to_new_window,
             .toggle_tab_overview,
             .toggle_toolbar,
+            .toggle_pane_decorations,
             .toggle_float,
             .hide_float,
             .focus_float,

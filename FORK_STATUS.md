@@ -1,11 +1,55 @@
 # Ghostty fork: status and roadmap
 
-Updated: 2026-10-23
+Updated: 2026-10-24
 
 This document records the work completed across the development chats, the current feature boundaries, and the ideas discussed for future work. It describes this fork's GTK/Linux implementation. It does not imply equivalent support in the macOS application.
 
 ## Current checkpoint
 
+- Reviewed, committed and installed on 2026-10-24: pane decorations,
+  session/status redesign and UI font consistency are in jj change `ovytvymr`.
+  Review corrected a high-contrast selector override and restored the main-menu
+  tooltip; no blocking issues remain. The final GTK ReleaseFast build with
+  system Fontconfig, all 88 focused action-parser tests, Zig formatting and
+  whitespace checks passed. Installed ReleaseFast with system Fontconfig to
+  `~/.local`; the installed executable reports `1.3.2-HEAD+9e1c31062` and passes
+  the pane-decoration action/config checks. Installation notes were folded
+  into the same jj change afterward. Running sessions were not restarted.
+- Requested font consistency follow-up on 2026-10-24: apply
+  `window-title-font-family` across the GTK interface, including pane and
+  floating-panel headers, menus, pickers and dialogs. Terminal text retains
+  `font-family`. GTK ReleaseFast with system Fontconfig, Zig formatting and
+  diff checks passed. Included in the installed build above; a separate desktop
+  font check is not claimed.
+- Desktop feedback on 2026-10-24: pane decorations look good; the session/status
+  area needs a more Rex-inspired treatment. The user approved moving Lua
+  status to the far right. Follow-up: a flat, more spacious session control,
+  a 20 px Ghostty icon, no vertical dividers and a readable single status line
+  joining the existing two-line input with ` · ` (original text in tooltip).
+  Name auto-collapse remains independent. The final GTK ReleaseFast build with
+  system Fontconfig, Zig formatting and diff checks passed. The user approved
+  the bar redesign on the normal desktop on 2026-10-24. Included in the
+  installed build above.
+- Desktop-approved UI work, initially approved on 2026-10-23: toggleable tiled-pane framing with
+  rounded corners, padding/gaps and title/close headers like floating panels;
+  a persistent Ghostty session icon with an animated idle collapse of the
+  session name; subtle focus/appearance animations. The first implementation
+  is complete on 2026-10-24. GTK ReleaseFast with system Fontconfig, focused
+  action-parser tests, Zig formatting, diff checks and CLI config/action
+  validation passed. Pane decorations and the refined session/status bar are
+  desktop-approved on 2026-10-24; extended lifecycle testing is not claimed. The new
+  `gtk-pane-decorations` setting defaults to false; `toggle_pane_decorations`
+  and **Toggle Pane Decorations** override it per window until reload.
+  Session names use a three-second idle delay and 160 ms reveal, with a
+  persistent Ghostty icon. Installed in jj change `ovytvymr` as recorded above.
+  Desktop follow-up: decorated panes suppress the original split separator
+  lines, preserving their mouse-resize hit areas and layout allocation.
+  Rex is a UI inspiration as well as the Lua
+  API model. Den's local source is `/home/jemal/dev/thirdparty/den`.
+  Read `src/apprt/gtk/UI_REFINEMENT_PLAN.md` for the agreed scope, proposed
+  behavior, code references and validation workflow. Evaluate existing
+  `minimum-contrast` first; a Den-style OKLab correction algorithm and GTK
+  chrome contrast correction are not included in the first implementation.
 - Desktop-approved appearance follow-up on 2026-10-23: floating panels use a faint
   neutral border instead of an accent outline, a deeper shadow for the selected
   panel, and 4 px more header height through vertical padding. The GTK
@@ -142,7 +186,8 @@ This document records the work completed across the development chats, the curre
   commits are not pushed yet.
 - Commit messages have no `Co-Authored-By` line (user rule).
 - Next session: read this file, `src/apprt/gtk/SESSION_RESTORE.md` and
-  `src/apprt/gtk/LUA_PLAN.md`, then `jj status`. Independent floating panels
+  `src/apprt/gtk/LUA_PLAN.md`, plus `src/apprt/gtk/UI_REFINEMENT_PLAN.md`
+  for the completed UI task and validation notes, then `jj status`. Independent floating panels
   and Lua phase 4 events/titlebar status are installed and desktop-approved.
   Explored ideas are listed under
   "New ideas from 2026-10-23".
@@ -575,7 +620,9 @@ A later stage could float an existing pane and dock it again while preserving it
 ### Deliberately deferred ideas
 
 - Vertical tabs: an earlier idea, not implemented in this work.
-- Pane headers and additional pane spacing: deferred because of visual clutter and maintenance cost.
+- Pane headers and additional pane spacing: previously deferred; the user
+  approved an optional pane treatment on 2026-10-23. See `UI_REFINEMENT_PLAN.md`
+  under `src/apprt/gtk/` for the current implementation and validation status.
 - Multiple-selection pickers, confirmation dialogs, text-input request types, and live choice updates: possible API extensions, not supported today.
 - SSH-aware picker transport and multiplexer attachment discovery: separate transport/design work.
 - Processes surviving application exit: requires separating PTY/process ownership from the GUI and should be treated as its own architectural project.
@@ -687,9 +734,13 @@ upstream; `main` tracks `main@origin`. Never push `folie` to `origin`.
 | `kypvvzst` | gtk: configure session relaunch commands in Lua |
 | `upyuptwx` | gtk: add Lua events and titlebar status |
 | `lptzpuoy` | gtk: add per-tab floating terminal panels |
+| `ovytvymr` | gtk: refine pane and session chrome |
 
 ## Related implementation documentation
 
+- `src/apprt/gtk/UI_REFINEMENT_PLAN.md`: completed UI scope, Rex/Den UI
+  inspiration, tiled-pane framing, session-name collapse, animations and
+  contrast evaluation, implementation and validation status.
 - `src/apprt/gtk/SESSION_RESTORE.md`: configuration, session semantics, storage, snapshots, pane actions, and validation.
 - `src/apprt/gtk/PICKER_IPC.md`: request/response schema, endpoint targeting, lifecycle, limits, D-Bus methods, and Nushell usage.
 - `src/apprt/gtk/THEME_PICKER_PLAN.md`: implemented live theme picker and reference plan, appearance isolation, runtime scope, and validation criteria.

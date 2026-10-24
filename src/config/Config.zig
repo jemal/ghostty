@@ -2165,7 +2165,9 @@ keybind: Keybinds = .{},
 /// Note: any font available on the system may be used, this font is not
 /// required to be a fixed-width font.
 ///
-/// On GTK, this applies to the headerbar, tab titles, and session selector.
+/// On GTK, this applies throughout the application interface, including pane
+/// headers, floating panels, tabs, status text, menus, pickers and dialogs.
+/// Terminal text continues to use `font-family`.
 /// The font size follows the desktop settings, independently of `font-size`.
 ///
 /// Available since: 1.0.0 on macOS, 1.1.0 on GTK
@@ -3902,6 +3904,12 @@ else
 /// configuration is reloaded. Other titlebar and tab-bar visibility settings
 /// still apply. GTK only.
 @"gtk-toolbar-autohide": bool = true,
+
+/// Decorate tiled terminal panes with rounded frames, gaps and title/close
+/// headers. Applies to single and zoomed panes too. Floating terminals retain
+/// their own frames. GTK only. The `toggle_pane_decorations` action overrides
+/// this for the current window until configuration is reloaded.
+@"gtk-pane-decorations": bool = false,
 
 /// If this is `true`, the titlebar will be hidden when the window is maximized,
 /// and shown when the titlebar is unmaximized. GTK only.

@@ -564,6 +564,12 @@ fn actionCommands(action: Action.Key) []const Command {
             .description = i18n.N_("Focus and raise the previous floating terminal."),
         }},
 
+        .toggle_pane_decorations => comptime &.{.{
+            .action = .toggle_pane_decorations,
+            .title = i18n.N_("Toggle Pane Decorations"),
+            .description = i18n.N_("Show or hide tiled pane frames and headers (GTK only)."),
+        }},
+
         .toggle_toolbar => comptime &.{.{
             .action = .toggle_toolbar,
             .title = i18n.N_("Toggle Toolbar"),
