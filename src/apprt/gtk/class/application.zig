@@ -3291,6 +3291,9 @@ const Action = struct {
             .surface => |core| {
                 // TODO: pass surface ID when we have that
                 const surface = core.rt_surface.surface;
+                if (ext.getAncestor(Tab, surface.as(gtk.Widget))) |tab| {
+                    if (tab.containsFloating(surface)) return tab.toggleFloatingZoom(surface);
+                }
                 const tree = ext.getAncestor(
                     SplitTree,
                     surface.as(gtk.Widget),

@@ -127,6 +127,18 @@ pub const FloatGeometry = struct {
 
     pub const Pixels = struct { x: i32, y: i32, width: i32, height: i32 };
 
+    /// Zoom is a display override; saved fractions remain unchanged. Keeping
+    /// this separate from pixels also preserves normal directional navigation.
+    pub fn displayPixels(self: FloatGeometry, parent_width: i32, parent_height: i32, zoomed: bool) Pixels {
+        if (zoomed) return .{
+            .x = 0,
+            .y = 0,
+            .width = @max(1, parent_width),
+            .height = @max(1, parent_height),
+        };
+        return self.pixels(parent_width, parent_height);
+    }
+
     /// Preserve alignment within the remaining space after minimum-size
     /// expansion. In particular, centered floats must stay centered.
     pub fn pixels(self: FloatGeometry, parent_width: i32, parent_height: i32) Pixels {
@@ -649,6 +661,17 @@ test "session rejects invalid floating identities selection and geometry" {
     try testing.expectError(error.InvalidTree, tab.validate());
     const empty: Tab = .{ .nodes = &.{} };
     try testing.expectError(error.InvalidTree, empty.validate());
+}
+
+test "floating zoom fills content and preserves normal geometry" {
+    const testing = std.testing;
+    const geometry: FloatGeometry = .{ .x = 0.1, .y = 0.15, .width = 0.5, .height = 0.4 };
+    const before = geometry.pixels(1000, 800);
+    try testing.expectEqualDeep(FloatGeometry.Pixels{ .x = 0, .y = 0, .width = 1000, .height = 800 }, geometry.displayPixels(1000, 800, true));
+    try testing.expectEqualDeep(FloatGeometry.Pixels{ .x = 0, .y = 0, .width = 600, .height = 400 }, geometry.displayPixels(600, 400, true));
+    try testing.expectEqualDeep(before, geometry.displayPixels(1000, 800, false));
+    try testing.expectEqualDeep(geometry.pixels(600, 400), geometry.displayPixels(600, 400, false));
+    try testing.expectEqualDeep(FloatGeometry.Pixels{ .x = 0, .y = 0, .width = 1, .height = 1 }, geometry.displayPixels(0, 0, true));
 }
 
 test "session floating geometry clamps movement and resizing" {

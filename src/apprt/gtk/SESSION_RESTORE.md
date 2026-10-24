@@ -338,6 +338,21 @@ Geometry. The legacy `next_float_tab`/`previous_float_tab` action names remain a
 creation-order panel cycling aliases; they do not create or expose a tab strip.
 No repository default bindings are imposed.
 
+`toggle_split_zoom` also works when a floating terminal is focused, including
+in a scratch-only tab. The command palette calls it **Toggle Pane Zoom**.
+It expands the selected panel to the tab's entire content area; toggling again
+restores its normal size and position. Its process and focus are preserved and
+the other panels stay underneath. Zoom follows content-area resizes without
+overwriting normal geometry. Move, resize or reset returns the selected panel
+to its normal geometry before applying the adjustment.
+
+Each panel remembers its own zoom state while the tab is alive; only the
+selected panel can display zoomed. Switching focus to another panel displays
+that panel according to its own state. Returning to a zoomed panel expands it
+again. Hiding/showing the group or switching main tabs retains zoom. Closing a
+panel discards its zoom state. Zoom is transient: saved sessions retain normal
+geometry, and restore floating panels unzoomed. Tiled zoom is independent.
+
 Toggle creates a shell if the group is empty; otherwise it shows/hides all of
 its panels together, retaining the active panel and stacking order. Clicking or
 moving keyboard focus to a tiled terminal hides the whole group. Main-tab

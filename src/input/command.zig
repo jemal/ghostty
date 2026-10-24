@@ -711,8 +711,8 @@ fn actionCommands(action: Action.Key) []const Command {
 
         .toggle_split_zoom => comptime &.{.{
             .action = .toggle_split_zoom,
-            .title = i18n.N_("Toggle Split Zoom"),
-            .description = i18n.N_("Toggle the zoom state of the current split."),
+            .title = i18n.N_("Toggle Pane Zoom"),
+            .description = i18n.N_("Zoom the current split or floating panel, or restore its normal size."),
         }},
 
         .toggle_readonly => comptime &.{.{

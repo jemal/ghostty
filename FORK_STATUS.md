@@ -6,6 +6,21 @@ This document records the work completed across the development chats, the curre
 
 ## Current checkpoint
 
+- Floating-panel zoom implementation on 2026-10-24: the existing
+  `toggle_split_zoom` binding and **Toggle Pane Zoom** command-palette entry
+  expand the selected floating panel to the tab's content area and restore
+  its normal geometry on the next toggle. Other panels stay underneath;
+  processes are preserved. Move/resize/reset leaves zoom before adjusting.
+  Zoom is per-panel transient state; only the selected panel displays zoomed,
+  and session saves retain normal geometry. Tiled zoom remains independent.
+  The GTK ReleaseFast build with system Fontconfig and Zig formatting passed.
+  The standalone session suite passed 18 tests with one existing Fish skip,
+  including zoom bounds and normal-geometry restoration across content resizes.
+  Desktop-approved and reviewed on 2026-10-24; no blocking issues remain.
+  Committed in jj change `klpmyuor` and installed ReleaseFast with system
+  Fontconfig to `~/.local`; the executable reports `1.3.2-HEAD+beba3e5f3`.
+  Installation notes were folded into the same change afterward. Running
+  sessions were not restarted.
 - Reviewed, committed and installed on 2026-10-24: pane decorations,
   session/status redesign and UI font consistency are in jj change `ovytvymr`.
   Review corrected a high-contrast selector override and restored the main-menu
@@ -735,6 +750,7 @@ upstream; `main` tracks `main@origin`. Never push `folie` to `origin`.
 | `upyuptwx` | gtk: add Lua events and titlebar status |
 | `lptzpuoy` | gtk: add per-tab floating terminal panels |
 | `ovytvymr` | gtk: refine pane and session chrome |
+| `klpmyuor` | gtk: add floating panel zoom |
 
 ## Related implementation documentation
 

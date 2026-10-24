@@ -204,6 +204,8 @@ pub const Tab = extern struct {
         close: *gtk.Button,
         name: ?[:0]const u8,
         geometry: sessions.FloatGeometry,
+        /// Transient presentation state; geometry always retains normal bounds.
+        zoomed: bool = false,
         dialog: ?*CloseConfirmationDialog = null,
     };
 
@@ -387,6 +389,16 @@ pub const Tab = extern struct {
             entry.widget.as(gtk.Widget).setVisible(@intFromBool(priv.floating_visible));
             if (i == priv.floating_selected) entry.widget.as(gtk.Widget).addCssClass("active") else entry.widget.as(gtk.Widget).removeCssClass("active");
         }
+        // Selection can change which panel is displayed at full size.
+        priv.content.as(gtk.Widget).queueAllocate();
+    }
+
+    pub fn toggleFloatingZoom(self: *Self, surface: *Surface) bool {
+        const index = self.floatingIndex(surface) orelse return false;
+        const entry = &self.private().floating.items[index];
+        entry.zoomed = !entry.zoomed;
+        self.presentFloating(surface);
+        return true;
     }
 
     pub fn presentFloating(self: *Self, surface: *Surface) void {
@@ -429,6 +441,7 @@ pub const Tab = extern struct {
             },
             .move_float, .resize_float => |direction| {
                 if (!self.floatingVisible() or self.floatingCount() == 0) return false;
+                priv.floating.items[priv.floating_selected].zoomed = false;
                 const dx: f64 = switch (direction) {
                     .left => -0.025,
                     .right => 0.025,
@@ -444,6 +457,7 @@ pub const Tab = extern struct {
             },
             .reset_float => {
                 if (self.floatingCount() == 0) return false;
+                priv.floating.items[priv.floating_selected].zoomed = false;
                 priv.floating.items[priv.floating_selected].geometry = configuredFloatingGeometry();
                 priv.content.as(gtk.Widget).queueAllocate();
             },
@@ -464,8 +478,12 @@ pub const Tab = extern struct {
 
     fn floatingPosition(_: *gtk.Overlay, child: *gtk.Widget, allocation: *gdk.Rectangle, self: *Self) callconv(.c) c_int {
         const priv = self.private();
-        for (priv.floating.items) |entry| if (entry.widget.as(gtk.Widget) == child) {
-            const rect = entry.geometry.pixels(priv.content.as(gtk.Widget).getWidth(), priv.content.as(gtk.Widget).getHeight());
+        for (priv.floating.items, 0..) |entry, i| if (entry.widget.as(gtk.Widget) == child) {
+            const rect = entry.geometry.displayPixels(
+                priv.content.as(gtk.Widget).getWidth(),
+                priv.content.as(gtk.Widget).getHeight(),
+                entry.zoomed and i == priv.floating_selected,
+            );
             allocation.* = .{ .f_x = rect.x, .f_y = rect.y, .f_width = rect.width, .f_height = rect.height };
             return 1;
         };
