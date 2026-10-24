@@ -3850,10 +3850,10 @@ else
 @"gtk-tabs-inverted": bool = false,
 
 /// The appearance of the GTK tab bar. `native` uses the desktop's standard
-/// tabs. `compact` uses rounded, content-width tabs with a subtle selected
-/// background and a matching named-session selector.
+/// tabs. `compact` uses rounded tabs with a subtle selected background and a
+/// matching named-session selector.
 ///
-/// Compact tabs override `gtk-wide-tabs` and work at either tab-bar location.
+/// Compact tabs respect `gtk-wide-tabs` and work at either tab-bar location.
 /// This does not change titlebar or tab-bar visibility. Use
 /// `gtk-titlebar-style = tabs` to place window controls alongside the tabs.
 /// Changes take effect when the configuration is reloaded. GTK only.
@@ -3862,6 +3862,7 @@ else
 /// Whether GTK window toolbars are shown initially. Set to `false` to hide
 /// the headerbar and tab bar, leaving more room for the terminal. Window-manager
 /// decorations are controlled separately by `window-decoration`.
+/// When true, `gtk-toolbar-autohide` can still hide unsaved single-tab windows.
 ///
 /// Use the `toggle_toolbar` binding action to show or hide the toolbars in
 /// the current window, for example `keybind = ctrl+shift+b=toggle_toolbar`.
@@ -3871,6 +3872,17 @@ else
 /// A reload or a new window uses this setting again. Showing toolbars still
 /// respects the titlebar style and `window-show-tab-bar`. GTK only.
 @"gtk-toolbar-visible": bool = true,
+
+/// Automatically hide window toolbars when a session is unsaved and has only
+/// one tab. Saved sessions and windows with multiple tabs show their toolbars.
+/// Requires `window-save-state = always`; quick terminals are unaffected.
+/// Set to `false` to keep toolbars visible in unsaved single-tab windows.
+///
+/// `gtk-toolbar-visible = false` still hides toolbars in every state. A manual
+/// `toggle_toolbar` overrides automatic visibility for the current window until
+/// configuration is reloaded. Other titlebar and tab-bar visibility settings
+/// still apply. GTK only.
+@"gtk-toolbar-autohide": bool = true,
 
 /// If this is `true`, the titlebar will be hidden when the window is maximized,
 /// and shown when the titlebar is unmaximized. GTK only.
@@ -3907,7 +3919,7 @@ else
 /// are the new typical Gnome style where tabs fill their available space.
 /// If you set this to `false` then tabs will only take up space they need,
 /// which is the old style.
-/// Compact `gtk-tabs-style` always uses content-width tabs.
+/// This also applies to compact `gtk-tabs-style`.
 @"gtk-wide-tabs": bool = true,
 
 /// If `true` (default), then two-finger horizontal scrolling on a touchpad

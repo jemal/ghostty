@@ -6,6 +6,24 @@ This document records the work completed across the development chats, the curre
 
 ## Current checkpoint
 
+- Installed on 2026-10-23 at the user's request: quick terminals now follow `window-show-tab-bar` even with
+  `gtk-titlebar-style = tabs`: auto hides a single tab and reveals multiple
+  tabs. Explicit always/never and manual toolbar overrides remain available.
+  The GTK build with system Fontconfig, Zig formatting and diff checks passed.
+  The ReleaseFast build with system Fontconfig is installed to `~/.local`.
+  The user confirmed the fix works on the desktop. Active processes were not
+  restarted by the agent.
+- Desktop-approved on 2026-10-23: session-enabled windows automatically hide toolbars when unsaved
+  with one tab, and show them when saved or containing multiple tabs.
+  `gtk-toolbar-autohide = false` disables the rule; manual toggles override it
+  until config reload. Quick terminals are unaffected. The GTK build with system
+  Fontconfig, Zig formatting and diff checks passed. Installed to `~/.local`
+  with ReleaseFast and system Fontconfig after desktop approval.
+- Desktop-approved on 2026-10-23: compact tabs now respect `gtk-wide-tabs` (default true), filling
+  the available bar. The custom rail width layout was removed. The GTK build
+  with system Fontconfig, Zig formatting and diff checks passed. Installed to
+  `~/.local` with ReleaseFast after desktop approval. These tab and toolbar changes,
+  including the quick-terminal fix, are recorded in jj change `zxrltonz`.
 - Repository: `/home/jemal/dev/projects/ghostty`
 - `folie` contains the fork history, including themed chrome, the live theme
   picker, the CLI working-directory fix, the local Fontconfig build guidance,
@@ -19,7 +37,7 @@ This document records the work completed across the development chats, the curre
 - Commit messages have no `Co-Authored-By` line (user rule).
 - Next session: read this file, `src/apprt/gtk/SESSION_RESTORE.md` and
   `src/apprt/gtk/LUA_PLAN.md`, then `jj status`. Open approved work: floating
-  scratch terminal, wider compact tabs or a new title/tab bar, titlebar
+  scratch terminal and titlebar
   time/status (needs Lua phase 4 events). Explored ideas are listed under
   "New ideas from 2026-10-23".
 - The old feature bookmarks were removed; their commits remain in `folie`.
@@ -199,7 +217,7 @@ gtk-tabs-style = compact
 gtk-titlebar-style = tabs
 ```
 
-The tab strip has a shared rounded rail, a raised selected tab, quieter inactive titles, fewer competing controls, and consistent session-selector styling. The rail fits the tab count while preserving the prior nominal tab width. Dividers separate inactive neighbors and disappear beside selected or hovered tabs.
+The tab strip has a shared rounded rail, a raised selected tab, quieter inactive titles, fewer competing controls, and consistent session-selector styling. Compact tabs respect `gtk-wide-tabs`: by default tabs fill the available bar; `false` retains narrower tabs. The user approved this on the desktop on 2026-10-23. Dividers separate inactive neighbors and disappear beside selected or hovered tabs.
 
 Native selection, close buttons, dragging, reordering, and overflow remain available. Top/bottom tabs and live style reload are supported. Tooltips retain full titles and directory information. UI typography follows desktop settings, with `window-title-font-family` covering the tab bar as well as the headerbar.
 
@@ -210,6 +228,14 @@ keybind = ctrl+shift+b=toggle_toolbar
 ```
 
 They can also start hidden with `gtk-toolbar-visible = false`. The command palette and terminal context menu provide a way to reveal them. Config reload restores configured visibility.
+
+With sessions enabled, `gtk-toolbar-autohide = true` (default) hides the bars
+for unsaved single-tab windows and shows them for saved sessions or multiple
+tabs. Splits do not affect the rule, and quick terminals keep their existing
+behavior. Set it to `false` to disable automatic hiding. Manual toolbar toggles
+override the rule until config reload. The GTK build with system Fontconfig,
+formatting and diff checks passed; the user approved the desktop behavior on
+2026-10-23.
 
 ### Theme-derived GTK chrome
 
@@ -438,7 +464,9 @@ The user approved these ideas for implementation. No order is set yet.
 - Floating scratch terminal (see "Floating terminals" above).
 - Random haiku session names: done 2026-10-23, together
   with Alt+N/Alt+S, unsaved sessions and a fixed-width session name.
-- Wider compact tabs, or a new title/tab bar design.
+- Wider compact tabs: done 2026-10-23 by respecting `gtk-wide-tabs`, with
+  desktop approval. Session-aware toolbar hiding was also implemented and
+  approved. A broader title/tab bar redesign remains optional future work.
 - Titlebar time/status. Lua phase 4 events would drive it.
 
 ### New ideas from 2026-10-23 (explored, not approved)

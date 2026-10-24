@@ -128,13 +128,14 @@ exports or a development shell's PATH).
 
 ## Compact tabs
 
-`gtk-tabs-style = compact` adds a shared rounded tab rail that grows and shrinks
-with the tabs, a raised selected pill, content-width tabs, and a matching session
-selector. The strip uses tighter tab/button padding. Dividers separate inactive
+`gtk-tabs-style = compact` adds a shared rounded tab rail, a raised selected
+pill, and a matching session selector. Tabs fill the available bar by default;
+set `gtk-wide-tabs = false` for narrower tabs. Native shrinking and overflow
+remain available. The strip uses tighter tab/button padding. Dividers separate inactive
 neighbors and fade beside selected or hovered tabs, following native tab order
 during dragging and reordering. `native` (the
 default) restores standard desktop styling. The choice can be reloaded live;
-compact mode overrides `gtk-wide-tabs` without changing its configured value.
+compact mode respects `gtk-wide-tabs`.
 
 The style works with top or bottom tabs, inverted close buttons, and either
 GTK titlebar style. Native tab selection, close buttons, dragging, overflow,
@@ -166,6 +167,19 @@ by the existing titlebar and tab-bar options.
 
 ## Hiding toolbars
 
+With sessions enabled, toolbars automatically hide for unsaved single-tab
+windows. Saving the session or opening a second tab reveals them; closing back
+to one tab hides them again if the session is still unsaved. Splits do not
+affect this rule. Quick terminals have no saved session: with
+`window-show-tab-bar = auto` (default), their tab bar hides with one tab and
+appears with multiple tabs, including with `gtk-titlebar-style = tabs`.
+Explicit `always` and `never` tab-bar settings still apply.
+
+Set `gtk-toolbar-autohide = false` to disable this policy. A manual toolbar
+toggle overrides the policy for that window until configuration is reloaded,
+so explicitly showing the bar keeps it visible even with one unsaved tab.
+The session shortcut and command palette remain available while bars are hidden.
+
 Use the binding action to toggle the headerbar and tab bar in the current
 window:
 
@@ -178,7 +192,8 @@ The binding is configurable and has no default shortcut. The command palette's
 item remain available when toolbars are hidden. The main menu also has the
 same toggle. Terminal keyboard focus is retained after toggling.
 
-To start with toolbars hidden, add `gtk-toolbar-visible = false`. Visibility
+To keep toolbars hidden regardless of session or tab count, add
+`gtk-toolbar-visible = false`. Visibility
 toggles are temporary per-window overrides; reloading config and creating new
 windows use the configured value. Showing a toolbar respects the existing
 headerbar and tab visibility options. Both top and bottom toolbars are covered;

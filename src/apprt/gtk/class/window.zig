@@ -724,6 +724,7 @@ pub const Window = extern struct {
     pub fn toggleToolbar(self: *Self) void {
         self.private().toolbar_visible_override = !self.getToolbarVisible();
         self.as(gobject.Object).notifyByPspec(properties.@"toolbar-visible".impl.param_spec);
+        self.as(gobject.Object).notifyByPspec(properties.@"tabs-autohide".impl.param_spec);
         // A toggle from a menu or the palette must leave keyboard input in
         // the terminal, including when its former toolbar widget is hidden.
         if (self.getActiveSurface()) |surface| surface.grabFocus();
@@ -733,7 +734,16 @@ pub const Window = extern struct {
         const priv = self.private();
         if (priv.toolbar_visible_override) |value| return value;
         const config = priv.config orelse return true;
-        return config.get().@"gtk-toolbar-visible";
+        if (!config.get().@"gtk-toolbar-visible") return false;
+        if (self.toolbarAutohideEnabled()) {
+            return priv.session_saved or priv.tab_view.getNPages() > 1;
+        }
+        return true;
+    }
+
+    fn toolbarAutohideEnabled(self: *Self) bool {
+        const config = self.private().config orelse return false;
+        return config.get().@"gtk-toolbar-autohide" and self.getSessionEnabled();
     }
 
     /// Toggle the visible property.
@@ -1235,6 +1245,8 @@ pub const Window = extern struct {
         priv.session_saved = true;
         priv.session_label.as(gtk.Widget).removeCssClass("dim-label");
         self.as(gobject.Object).notifyByPspec(properties.@"session-saved".impl.param_spec);
+        self.as(gobject.Object).notifyByPspec(properties.@"toolbar-visible".impl.param_spec);
+        self.as(gobject.Object).notifyByPspec(properties.@"tabs-autohide".impl.param_spec);
     }
 
     /// Save this window's session from now on, renamed to `name` if it is
@@ -1472,7 +1484,16 @@ pub const Window = extern struct {
         const priv = self.private();
         const config = if (priv.config) |v| v.get() else return true;
 
-        // Keep the session selector reachable even with a single tab.
+        // Explicitly showing toolbars or using the session-aware visibility
+        // policy must also reveal a single tab in the native titlebar style.
+        if (priv.toolbar_visible_override == true or self.toolbarAutohideEnabled()) return false;
+
+        // Quick terminals have no session selector or separate titlebar to
+        // preserve. Use the normal tab-count policy even with combined chrome.
+        if (self.isQuickTerminal()) return config.@"window-show-tab-bar" != .always;
+
+        // Keep the session selector reachable even with a single tab when
+        // automatic toolbar hiding is disabled.
         if (!self.isQuickTerminal() and config.@"window-save-state" == .always) return false;
 
         return switch (config.@"gtk-titlebar-style") {
@@ -1496,6 +1517,8 @@ pub const Window = extern struct {
     fn getTabsVisible(self: *Self) bool {
         const priv = self.private();
         const config = if (priv.config) |v| v.get() else return true;
+
+        if (self.isQuickTerminal()) return config.@"window-show-tab-bar" != .never;
 
         switch (config.@"gtk-titlebar-style") {
             .tabs => {
@@ -1521,9 +1544,8 @@ pub const Window = extern struct {
         return config.@"gtk-tabs-inverted";
     }
 
-    /// Give the compact rail a preferred width per tab without increasing its
-    /// minimum width. The native scroller can still compress and overflow when
-    /// the window is narrow, while short titles retain the usual tab width.
+    /// Keep native expansion and overflow, with a smaller minimum rail width
+    /// in compact mode. Pinned tabs retain their natural width.
     fn configureTabRail(widget: *gtk.Widget, compact: bool) void {
         if (gobject.ext.cast(gtk.ScrolledWindow, widget)) |scroll| {
             if (scroll.getChild()) |child| {
@@ -1534,29 +1556,9 @@ pub const Window = extern struct {
                         widget.setHalign(if (compact) .start else .fill);
                         return;
                     }
-                    var rail = widget.getParent().?;
-                    if (compact and rail.hasCssClass("tab-rail-layout") == 0) {
-                        const box = gobject.ext.cast(gtk.Box, rail) orelse return;
-                        const previous = widget.getPrevSibling();
-                        const bin = adw.Bin.new();
-                        rail = bin.as(gtk.Widget);
-                        rail.addCssClass("tab-rail-layout");
-                        rail.setHexpand(1);
-                        rail.setLayoutManager(gtk.CustomLayout.new(null, tabRailMeasure, tabRailAllocate).as(gtk.LayoutManager));
-                        _ = widget.as(gobject.Object).ref();
-                        box.remove(widget);
-                        bin.setChild(widget);
-                        box.insertChildAfter(rail, previous);
-                        widget.as(gobject.Object).unref();
-                    }
                     scroll.setPropagateNaturalWidth(0);
                     scroll.setMinContentWidth(if (compact) 0 else 100);
                     widget.setHalign(.fill);
-                    if (rail.hasCssClass("tab-rail-layout") != 0) {
-                        rail.setHalign(if (compact) .start else .fill);
-                        if (compact) rail.addCssClass("compact") else rail.removeCssClass("compact");
-                        rail.queueResize();
-                    }
                     return;
                 }
             }
@@ -1565,32 +1567,10 @@ pub const Window = extern struct {
         while (child) |current| : (child = current.getNextSibling()) configureTabRail(current, compact);
     }
 
-    fn tabRailMeasure(widget: *gtk.Widget, orientation: gtk.Orientation, for_size: c_int, minimum: *c_int, natural: *c_int, minimum_baseline: *c_int, natural_baseline: *c_int) callconv(.c) void {
-        const bin = gobject.ext.cast(adw.Bin, widget) orelse unreachable;
-        const child = bin.getChild() orelse unreachable;
-        child.measure(orientation, for_size, minimum, natural, minimum_baseline, natural_baseline);
-        if (orientation == .horizontal and widget.hasCssClass("compact") != 0) {
-            if (widget.getAncestor(Self.getGObjectType())) |ancestor| {
-                const self = gobject.ext.cast(Self, ancestor) orelse unreachable;
-                const view = self.private().tab_view;
-                const count = view.getNPages() - view.getNPinnedPages();
-                // AdwTabBar's normal non-expanding tabs are 215px, with 5px
-                // spacing between tabs and at either end of the viewport.
-                natural.* = @max(natural.*, count * 220 + 5);
-            }
-        }
-    }
-
-    fn tabRailAllocate(widget: *gtk.Widget, width: c_int, height: c_int, baseline: c_int) callconv(.c) void {
-        const bin = gobject.ext.cast(adw.Bin, widget) orelse unreachable;
-        const child = bin.getChild() orelse unreachable;
-        child.allocate(width, height, baseline, null);
-    }
-
     fn getTabsWide(self: *Self) bool {
         const priv = self.private();
         const config = if (priv.config) |v| v.get() else return true;
-        return config.@"gtk-tabs-style" != .compact and config.@"gtk-wide-tabs";
+        return config.@"gtk-wide-tabs";
     }
 
     fn getTabsCompact(self: *Self) bool {
@@ -2327,6 +2307,7 @@ pub const Window = extern struct {
         self: *Self,
     ) callconv(.c) void {
         const priv = self.private();
+        self.as(gobject.Object).notifyByPspec(properties.@"toolbar-visible".impl.param_spec);
         if (priv.tab_view.getNPages() == 0) {
             // If we have no pages left then we want to close window.
 
