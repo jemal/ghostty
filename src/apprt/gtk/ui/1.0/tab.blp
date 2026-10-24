@@ -21,8 +21,12 @@ template $GhosttyTab: Box {
     split_tree.active-surface as <$GhosttySurface>.pwd
     ) as <string>;
 
-  $GhosttySplitTree split_tree {
-    notify::active-surface => $notify_active_surface();
-    notify::tree => $notify_tree();
+  Overlay content {
+    hexpand: true;
+    vexpand: true;
+    $GhosttySplitTree split_tree {
+      notify::active-surface => $notify_active_surface();
+      notify::tree => $notify_tree();
+    }
   }
 }

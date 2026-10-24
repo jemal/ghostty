@@ -3118,9 +3118,16 @@ pub const Surface = extern struct {
         const priv = self.private();
         const core_surface = priv.core_surface orelse return;
 
-        // If we don't have focus, grab it.
+        // Capture focus before hiding an overlay can change GTK's focus.
+        // The first click should only return to the tiled pane.
         const widget = priv.render_surface.as(gtk.Widget);
         const had_focus = widget.hasFocus() != 0;
+        const Tab = @import("tab.zig").Tab;
+        if (ext.getAncestor(Tab, self.as(gtk.Widget))) |tab| {
+            if (!tab.containsFloating(self)) tab.hideFloating(false);
+        }
+
+        // If we don't have focus, grab it.
         if (!had_focus) {
             _ = widget.grabFocus();
         }

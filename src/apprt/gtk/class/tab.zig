@@ -4,6 +4,11 @@ const gio = @import("gio");
 const glib = @import("glib");
 const gobject = @import("gobject");
 const gtk = @import("gtk");
+const gdk = @import("gdk");
+const sessions = @import("../session.zig");
+const Binding = @import("../../../input/Binding.zig");
+const SurfaceScrolledWindow = @import("surface_scrolled_window.zig").SurfaceScrolledWindow;
+const CloseConfirmationDialog = @import("close_confirmation_dialog.zig").CloseConfirmationDialog;
 
 const configpkg = @import("../../../config.zig");
 const apprt = @import("../../../apprt.zig");
@@ -143,6 +148,16 @@ pub const Tab = extern struct {
     };
 
     pub const signals = struct {
+        pub const @"floating-added" = struct {
+            pub const name = "floating-added";
+            pub const impl = gobject.ext.defineSignal(name, Self, &.{*Surface}, void);
+            pub const connect = impl.connect;
+        };
+        pub const @"floating-removed" = struct {
+            pub const name = "floating-removed";
+            pub const impl = gobject.ext.defineSignal(name, Self, &.{*Surface}, void);
+            pub const connect = impl.connect;
+        };
         /// Emitted whenever the tab would like to be closed.
         pub const @"close-request" = struct {
             pub const name = "close-request";
@@ -171,9 +186,438 @@ pub const Tab = extern struct {
 
         // Template bindings
         split_tree: *SplitTree,
+        content: *gtk.Overlay,
+        focus_source: ?c_uint = null,
+        hide_source: ?c_uint = null,
+        floating: std.ArrayList(FloatEntry) = .empty,
+        floating_selected: usize = 0,
+        floating_visible: bool = false,
+        disposing: bool = false,
 
         pub var offset: c_int = 0;
     };
+
+    const FloatEntry = struct {
+        surface: *Surface, // owned by the panel's scrolled window
+        widget: *gtk.Box,
+        button: *gtk.Button,
+        close: *gtk.Button,
+        name: ?[:0]const u8,
+        geometry: sessions.FloatGeometry,
+        dialog: ?*CloseConfirmationDialog = null,
+    };
+
+    pub fn floatingCount(self: *Self) usize {
+        return self.private().floating.items.len;
+    }
+
+    pub fn floatingSurface(self: *Self, index: usize) *Surface {
+        return self.private().floating.items[index].surface;
+    }
+
+    fn floatingIndex(self: *Self, surface: *Surface) ?usize {
+        for (self.private().floating.items, 0..) |entry, i| if (entry.surface == surface) return i;
+        return null;
+    }
+
+    pub fn floatingName(self: *Self, surface: *Surface) ?[:0]const u8 {
+        const index = self.floatingIndex(surface) orelse return null;
+        return self.private().floating.items[index].name;
+    }
+
+    pub fn floatingSelected(self: *Self) usize {
+        return self.private().floating_selected;
+    }
+
+    pub fn floatingVisible(self: *Self) bool {
+        return self.private().floating_visible;
+    }
+
+    /// Compatibility fallback for manifests from the original tabbed preview.
+    pub fn floatingGeometry(self: *Self) sessions.FloatGeometry {
+        return if (self.floatingCount() > 0) self.private().floating.items[self.floatingSelected()].geometry else .{};
+    }
+
+    pub fn floatingGeometryFor(self: *Self, surface: *Surface) sessions.FloatGeometry {
+        return self.private().floating.items[self.floatingIndex(surface).?].geometry;
+    }
+
+    pub fn floatingStackIndex(self: *Self, surface: *Surface) usize {
+        var child = self.private().content.as(gtk.Widget).getFirstChild();
+        var order: usize = 0;
+        while (child) |widget| : (child = widget.getNextSibling()) {
+            for (self.private().floating.items) |entry| if (entry.widget.as(gtk.Widget) == widget) {
+                if (entry.surface == surface) return order;
+                order += 1;
+                break;
+            };
+        }
+        unreachable;
+    }
+
+    pub fn containsFloating(self: *Self, surface: *Surface) bool {
+        return self.floatingIndex(surface) != null;
+    }
+
+    pub const SurfaceIterator = struct {
+        tab: *Self,
+        node: usize = 0,
+        floating: usize = 0,
+
+        pub fn next(it: *SurfaceIterator) ?*Surface {
+            if (it.tab.getSurfaceTree()) |tree| {
+                while (it.node < tree.nodes.len) {
+                    const node = tree.nodes[it.node];
+                    it.node += 1;
+                    if (node == .leaf) return node.leaf;
+                }
+            }
+            if (it.floating >= it.tab.floatingCount()) return null;
+            defer it.floating += 1;
+            return it.tab.floatingSurface(it.floating);
+        }
+    };
+
+    pub fn surfaces(self: *Self) SurfaceIterator {
+        return .{ .tab = self };
+    }
+
+    pub fn openFloating(self: *Self, parent: ?*Surface, overrides: Overrides, name: ?[:0]const u8) !void {
+        if (name) |key| for (self.private().floating.items) |entry| {
+            if (entry.name) |existing| if (std.mem.eql(u8, key, existing)) {
+                self.presentFloating(entry.surface);
+                return;
+            };
+        };
+        if (self.floatingCount() >= sessions.max_tabs) return error.OpenFailed;
+        const surface: *Surface = .new(overrides);
+        _ = surface.refSink();
+        defer surface.unref();
+        if (parent) |p| if (p.core()) |core| surface.setParent(core, .split);
+        try self.addFloating(surface, name);
+        self.presentFloating(surface);
+    }
+
+    fn configuredFloatingGeometry() sessions.FloatGeometry {
+        const config = Application.default().getConfig();
+        defer config.unref();
+        return sessions.FloatGeometry.anchored(
+            config.get().@"gtk-floating-terminal-anchor",
+            config.get().@"gtk-floating-terminal-size".width,
+            config.get().@"gtk-floating-terminal-size".height,
+        );
+    }
+
+    pub fn addFloating(self: *Self, surface: *Surface, name: ?[:0]const u8) !void {
+        const priv = self.private();
+        const alloc = Application.default().allocator();
+        const copy = if (name) |n| try alloc.dupeSentinel(u8, n, 0) else null;
+        errdefer if (copy) |n| alloc.free(n);
+        try priv.floating.ensureUnusedCapacity(alloc, 1);
+        const width = priv.content.as(gtk.Widget).getWidth();
+        const height = priv.content.as(gtk.Widget).getHeight();
+        const geometry = if (self.floatingCount() > 0)
+            priv.floating.items[priv.floating_selected].geometry.cascade(if (width > 0) width else 800, if (height > 0) height else 600)
+        else
+            configuredFloatingGeometry();
+        const panel = gtk.Box.new(.vertical, 0);
+        panel.as(gtk.Widget).addCssClass("floating-terminal");
+        panel.as(gtk.Widget).setOverflow(.hidden);
+        panel.as(gtk.Widget).setVisible(0);
+        const header = gtk.Box.new(.horizontal, 0);
+        header.as(gtk.Widget).addCssClass("floating-titlebar");
+        const button = gtk.Button.newWithLabel(surface.getEffectiveTitle() orelse name orelse "Terminal");
+        button.as(gtk.Widget).addCssClass("flat");
+        button.as(gtk.Widget).setFocusOnClick(0);
+        button.as(gtk.Widget).setHexpand(1);
+        const label = gobject.ext.cast(gtk.Label, button.getChild().?).?;
+        label.setEllipsize(.end);
+        label.setXalign(0);
+        const close = gtk.Button.newFromIconName("window-close-symbolic");
+        close.as(gtk.Widget).addCssClass("flat");
+        close.as(gtk.Widget).setFocusOnClick(0);
+        close.as(gtk.Widget).setTooltipText("Close floating terminal");
+        header.append(button.as(gtk.Widget));
+        header.append(close.as(gtk.Widget));
+        panel.append(header.as(gtk.Widget));
+        const scrolled = gobject.ext.newInstance(SurfaceScrolledWindow, .{ .surface = surface });
+        scrolled.as(gtk.Widget).setVexpand(1);
+        panel.append(scrolled.as(gtk.Widget));
+        priv.floating.appendAssumeCapacity(.{ .surface = surface, .widget = panel, .button = button, .close = close, .name = copy, .geometry = geometry });
+        priv.content.addOverlay(panel.as(gtk.Widget));
+        priv.content.setClipOverlay(panel.as(gtk.Widget), 1);
+        _ = gtk.Button.signals.clicked.connect(button, *Self, floatingTitleClicked, self, .{});
+        _ = gtk.Button.signals.clicked.connect(close, *Self, floatingCloseClicked, self, .{});
+        _ = gobject.Object.signals.notify.connect(surface, *Self, floatingMapped, self, .{ .detail = "mapped" });
+        _ = gobject.Object.signals.notify.connect(surface, *Self, floatingFocused, self, .{ .detail = "focused" });
+        _ = Surface.signals.@"close-request".connect(surface, *Self, floatingCloseRequest, self, .{});
+        _ = gobject.Object.signals.notify.connect(surface, *Self, floatingTitleChanged, self, .{ .detail = "title" });
+        _ = gobject.Object.signals.notify.connect(surface, *Self, floatingTitleChanged, self, .{ .detail = "title-override" });
+        signals.@"floating-added".impl.emit(self, null, .{surface}, null);
+    }
+
+    pub fn restoreFloatingState(self: *Self, saved: sessions.Tab) void {
+        const priv = self.private();
+        for (priv.floating.items, saved.floating, 0..) |*entry, record, i| {
+            // Earlier tabbed manifests have one shared rectangle.
+            entry.geometry = record.geometry orelse if (i == 0) saved.floating_geometry else priv.floating.items[i - 1].geometry.cascade(800, 600);
+        }
+        for (0..self.floatingCount()) |order| {
+            for (saved.floating, 0..) |record, i| if (record.stacking == order) self.raiseFloating(i);
+        }
+        priv.floating_selected = saved.floating_selected;
+        priv.floating_visible = self.floatingCount() > 0 and (saved.floating_visible or self.getSurfaceTree() == null);
+        self.syncFloatingPanels();
+        self.queueFloatingFocus();
+        self.activeChanged();
+    }
+
+    /// Reorder an already-parented child without removing it from GtkOverlay.
+    /// That preserves realization, GPU resources, and the running process.
+    fn raiseFloating(self: *Self, index: usize) void {
+        const content = self.private().content.as(gtk.Widget);
+        const panel = self.private().floating.items[index].widget.as(gtk.Widget);
+        const last = content.getLastChild();
+        if (last != panel) panel.insertAfter(content, last);
+    }
+
+    fn syncFloatingPanels(self: *Self) void {
+        const priv = self.private();
+        for (priv.floating.items, 0..) |entry, i| {
+            entry.widget.as(gtk.Widget).setVisible(@intFromBool(priv.floating_visible));
+            if (i == priv.floating_selected) entry.widget.as(gtk.Widget).addCssClass("active") else entry.widget.as(gtk.Widget).removeCssClass("active");
+        }
+    }
+
+    pub fn presentFloating(self: *Self, surface: *Surface) void {
+        const index = self.floatingIndex(surface) orelse return;
+        const priv = self.private();
+        priv.floating_selected = index;
+        priv.floating_visible = true;
+        self.syncFloatingPanels();
+        self.raiseFloating(index);
+        self.activeChanged();
+        surface.grabFocus();
+        self.queueFloatingFocus();
+    }
+
+    pub fn hideFloating(self: *Self, restore_focus: bool) void {
+        if (self.getSurfaceTree() == null) return;
+        const priv = self.private();
+        priv.floating_visible = false;
+        self.syncFloatingPanels();
+        self.activeChanged();
+        if (restore_focus) if (priv.split_tree.getActiveSurface()) |surface| surface.grabFocus();
+    }
+
+    pub fn floatingAction(self: *Self, action: Binding.Action) bool {
+        const priv = self.private();
+        switch (action) {
+            .toggle_float => {
+                if (self.floatingVisible()) self.hideFloating(true) else if (self.floatingCount() > 0) {
+                    self.presentFloating(self.floatingSurface(self.floatingSelected()));
+                } else self.openFloating(self.getActiveSurface(), .none, null) catch return false;
+            },
+            .hide_float => self.hideFloating(true),
+            .focus_float => |direction| {
+                if (!self.floatingVisible() or self.floatingCount() == 0) return false;
+                var geometries: [sessions.max_tabs]sessions.FloatGeometry = undefined;
+                for (priv.floating.items, geometries[0..self.floatingCount()]) |entry, *geometry| geometry.* = entry.geometry;
+                if (sessions.FloatGeometry.neighbor(geometries[0..self.floatingCount()], priv.floating_selected, direction, priv.content.as(gtk.Widget).getWidth(), priv.content.as(gtk.Widget).getHeight())) |index|
+                    self.presentFloating(self.floatingSurface(index));
+                // A single panel still handles the key instead of moving focus to tiles.
+            },
+            .move_float, .resize_float => |direction| {
+                if (!self.floatingVisible() or self.floatingCount() == 0) return false;
+                const dx: f64 = switch (direction) {
+                    .left => -0.025,
+                    .right => 0.025,
+                    else => 0,
+                };
+                const dy: f64 = switch (direction) {
+                    .up => -0.025,
+                    .down => 0.025,
+                    else => 0,
+                };
+                priv.floating.items[priv.floating_selected].geometry.adjust(dx, dy, action == .resize_float);
+                priv.content.as(gtk.Widget).queueAllocate();
+            },
+            .reset_float => {
+                if (self.floatingCount() == 0) return false;
+                priv.floating.items[priv.floating_selected].geometry = configuredFloatingGeometry();
+                priv.content.as(gtk.Widget).queueAllocate();
+            },
+            .next_float_tab, .previous_float_tab => {
+                const count = self.floatingCount();
+                if (count == 0) return false;
+                const index = (self.floatingSelected() + if (action == .next_float_tab) @as(usize, 1) else count - 1) % count;
+                self.presentFloating(self.floatingSurface(index));
+            },
+            else => return false,
+        }
+        return true;
+    }
+
+    fn activeChanged(self: *Self) void {
+        self.as(gobject.Object).notifyByPspec(properties.@"active-surface".impl.param_spec);
+    }
+
+    fn floatingPosition(_: *gtk.Overlay, child: *gtk.Widget, allocation: *gdk.Rectangle, self: *Self) callconv(.c) c_int {
+        const priv = self.private();
+        for (priv.floating.items) |entry| if (entry.widget.as(gtk.Widget) == child) {
+            const rect = entry.geometry.pixels(priv.content.as(gtk.Widget).getWidth(), priv.content.as(gtk.Widget).getHeight());
+            allocation.* = .{ .f_x = rect.x, .f_y = rect.y, .f_width = rect.width, .f_height = rect.height };
+            return 1;
+        };
+        return 0;
+    }
+
+    fn floatingTitleClicked(button: *gtk.Button, self: *Self) callconv(.c) void {
+        for (self.private().floating.items) |entry| if (entry.button == button) {
+            self.presentFloating(entry.surface);
+            return;
+        };
+    }
+
+    fn floatingCloseClicked(button: *gtk.Button, self: *Self) callconv(.c) void {
+        for (self.private().floating.items) |entry| if (entry.close == button) {
+            entry.surface.close();
+            return;
+        };
+    }
+
+    pub fn restoreFloatingFocus(self: *Self) bool {
+        if (!self.floatingVisible() or self.floatingCount() == 0) return false;
+        const index = self.floatingSelected();
+        const surface = self.floatingSurface(index);
+        if (surface.getMapped()) {
+            self.raiseFloating(index);
+            surface.grabFocus();
+        }
+        return true;
+    }
+
+    pub fn tiledFocused(self: *Self) void {
+        const priv = self.private();
+        if (self.floatingVisible() and priv.hide_source == null)
+            priv.hide_source = glib.idleAdd(hideFloatingIdle, self);
+    }
+
+    fn hideFloatingIdle(data: ?*anyopaque) callconv(.c) c_int {
+        const self: *Self = @ptrCast(@alignCast(data orelse return 0));
+        self.private().hide_source = null;
+        if (self.getSplitTree().getActiveSurface()) |surface| {
+            if (surface.getFocused() and surface.getMapped()) self.hideFloating(false);
+        }
+        return 0;
+    }
+
+    fn floatingFocused(surface: *Surface, _: *gobject.ParamSpec, self: *Self) callconv(.c) void {
+        if (!surface.getFocused() or !self.floatingVisible()) return;
+        const widget = surface.as(gtk.Widget);
+        const root = widget.getRoot() orelse return;
+        const focus = root.getFocus() orelse return;
+        if (focus != widget and focus.isAncestor(widget) == 0) return;
+        self.private().floating_selected = self.floatingIndex(surface) orelse return;
+        self.syncFloatingPanels();
+        self.activeChanged();
+        // Raising waits until GTK has finished its focus traversal.
+        self.queueFloatingFocus();
+    }
+
+    fn floatingMapped(surface: *Surface, _: *gobject.ParamSpec, self: *Self) callconv(.c) void {
+        if (surface.getMapped()) self.queueFloatingFocus();
+    }
+
+    fn queueFloatingFocus(self: *Self) void {
+        const priv = self.private();
+        if (!priv.disposing and priv.focus_source == null) priv.focus_source = glib.idleAdd(focusFloatingIdle, self);
+    }
+
+    fn focusFloatingIdle(data: ?*anyopaque) callconv(.c) c_int {
+        const self: *Self = @ptrCast(@alignCast(data orelse return 0));
+        self.private().focus_source = null;
+        if (self.as(gtk.Widget).getMapped() != 0 and !self.restoreFloatingFocus()) {
+            if (self.getActiveSurface()) |surface| surface.grabFocus();
+        }
+        return 0;
+    }
+
+    fn floatingTitleChanged(surface: *Surface, _: *gobject.ParamSpec, self: *Self) callconv(.c) void {
+        const index = self.floatingIndex(surface) orelse return;
+        const entry = self.private().floating.items[index];
+        const title = surface.getEffectiveTitle() orelse entry.name orelse "Terminal";
+        entry.button.setLabel(title);
+        entry.button.as(gtk.Widget).setTooltipText(title);
+        const label = gobject.ext.cast(gtk.Label, entry.button.getChild().?).?;
+        label.setEllipsize(.end);
+        label.setXalign(0);
+    }
+
+    fn floatingCloseRequest(surface: *Surface, self: *Self) callconv(.c) void {
+        const index = self.floatingIndex(surface) orelse return;
+        const priv = self.private();
+        if (priv.floating.items[index].dialog != null) return;
+        if (surface.core()) |core| if (core.needsConfirmQuit()) {
+            const dialog: *CloseConfirmationDialog = .new(.surface);
+            priv.floating.items[index].dialog = dialog;
+            _ = CloseConfirmationDialog.signals.@"close-request".connect(dialog, *Self, floatingConfirmClose, self, .{});
+            _ = CloseConfirmationDialog.signals.cancel.connect(dialog, *Self, floatingCancelClose, self, .{});
+            dialog.present(self.as(gtk.Widget));
+            return;
+        };
+        self.finishFloatingClose(surface);
+    }
+
+    fn floatingConfirmClose(dialog: *CloseConfirmationDialog, self: *Self) callconv(.c) void {
+        for (self.private().floating.items) |*entry| if (entry.dialog == dialog) {
+            const surface = entry.surface;
+            _ = gobject.signalHandlersDisconnectMatched(dialog.as(gobject.Object), .{ .data = true }, 0, 0, null, null, self);
+            entry.dialog = null;
+            self.finishFloatingClose(surface);
+            return;
+        };
+    }
+
+    fn floatingCancelClose(dialog: *CloseConfirmationDialog, self: *Self) callconv(.c) void {
+        for (self.private().floating.items) |*entry| if (entry.dialog == dialog) {
+            _ = gobject.signalHandlersDisconnectMatched(dialog.as(gobject.Object), .{ .data = true }, 0, 0, null, null, self);
+            entry.dialog = null;
+            return;
+        };
+    }
+
+    fn finishFloatingClose(self: *Self, surface: *Surface) void {
+        const index = self.floatingIndex(surface) orelse return;
+        const priv = self.private();
+        const active = self.floatingSurface(priv.floating_selected);
+        const entry = priv.floating.items[index];
+        signals.@"floating-removed".impl.emit(self, null, .{surface}, null);
+        _ = gobject.signalHandlersDisconnectMatched(surface.as(gobject.Object), .{ .data = true }, 0, 0, null, null, self);
+        if (entry.name) |name| Application.default().allocator().free(name);
+        _ = priv.floating.orderedRemove(index);
+        priv.floating_selected = 0;
+        if (active != surface) priv.floating_selected = self.floatingIndex(active) orelse 0;
+        // Update selection before disposal can trigger application callbacks.
+        priv.content.removeOverlay(entry.widget.as(gtk.Widget));
+        if (self.floatingCount() == 0) {
+            priv.floating_visible = false;
+            if (priv.split_tree.getActiveSurface() == null) {
+                self.activeChanged();
+                signals.@"close-request".impl.emit(self, null, .{}, null);
+                return;
+            }
+        } else if (active == surface) {
+            const top = priv.content.as(gtk.Widget).getLastChild();
+            for (priv.floating.items, 0..) |remaining, i| if (remaining.widget.as(gtk.Widget) == top) {
+                priv.floating_selected = i;
+                break;
+            };
+        }
+        self.syncFloatingPanels();
+        self.activeChanged();
+        self.queueFloatingFocus();
+    }
 
     /// Set the parent of this tab page. This only affects the first surface
     /// ever created for a tab. If a surface was already created this does
@@ -230,7 +674,7 @@ pub const Tab = extern struct {
     fn init(self: *Self, _: *Class) callconv(.c) void {
         gtk.Widget.initTemplate(self.as(gtk.Widget));
 
-        // Init our actions
+        _ = gtk.Overlay.signals.get_child_position.connect(self.private().content, *Self, floatingPosition, self, .{});
         self.initActionMap();
     }
 
@@ -286,6 +730,7 @@ pub const Tab = extern struct {
     /// Get the currently active surface. See the "active-surface" property.
     /// This does not ref the value.
     pub fn getActiveSurface(self: *Self) ?*Surface {
+        if (self.floatingVisible() and self.floatingCount() > 0) return self.floatingSurface(self.floatingSelected());
         return self.getSplitTree().getActiveSurface();
     }
 
@@ -308,8 +753,11 @@ pub const Tab = extern struct {
     /// Returns true if this tab needs confirmation before quitting based
     /// on the various Ghostty configurations.
     pub fn getNeedsConfirmQuit(self: *Self) bool {
-        const tree = self.getSplitTree();
-        return tree.getNeedsConfirmQuit();
+        var it = self.surfaces();
+        while (it.next()) |surface| if (surface.core()) |core| {
+            if (core.needsConfirmQuit()) return true;
+        };
+        return false;
     }
 
     /// Get the tab view holding this tab, if any.
@@ -331,6 +779,25 @@ pub const Tab = extern struct {
 
     fn dispose(self: *Self) callconv(.c) void {
         const priv = self.private();
+        priv.disposing = true;
+        if (priv.hide_source) |source| {
+            _ = glib.Source.remove(source);
+            priv.hide_source = null;
+        }
+        if (priv.focus_source) |source| {
+            _ = glib.Source.remove(source);
+            priv.focus_source = null;
+        }
+        for (priv.floating.items) |entry| {
+            if (entry.dialog) |dialog| {
+                _ = gobject.signalHandlersDisconnectMatched(dialog.as(gobject.Object), .{ .data = true }, 0, 0, null, null, self);
+                dialog.close();
+            }
+            _ = gobject.signalHandlersDisconnectMatched(entry.surface.as(gobject.Object), .{ .data = true }, 0, 0, null, null, self);
+            if (entry.name) |name| Application.default().allocator().free(name);
+        }
+        priv.floating.deinit(Application.default().allocator());
+        priv.floating = .empty;
         if (priv.config) |v| {
             v.unref();
             priv.config = null;
@@ -379,7 +846,10 @@ pub const Tab = extern struct {
 
         // If our tree is empty we close the tab.
         const tree: *const Surface.Tree = self.getSurfaceTree() orelse &.empty;
-        if (tree.isEmpty()) {
+        self.getSplitTree().as(gtk.Widget).setVisible(@intFromBool(!tree.isEmpty()));
+        if (tree.isEmpty() and self.floatingCount() > 0) {
+            self.presentFloating(self.floatingSurface(self.floatingSelected()));
+        } else if (tree.isEmpty()) {
             signals.@"close-request".impl.emit(
                 self,
                 null,
@@ -586,6 +1056,7 @@ pub const Tab = extern struct {
 
             // Bindings
             class.bindTemplateChildPrivate("split_tree", .{});
+            class.bindTemplateChildPrivate("content", .{});
 
             // Template Callbacks
             class.bindTemplateCallback("computed_title", &closureComputedTitle);
@@ -595,6 +1066,8 @@ pub const Tab = extern struct {
 
             // Signals
             signals.@"close-request".impl.register(.{});
+            signals.@"floating-added".impl.register(.{});
+            signals.@"floating-removed".impl.register(.{});
 
             // Virtual methods
             gobject.Object.virtual_methods.dispose.implement(class, &dispose);

@@ -301,6 +301,99 @@ Rearranged layouts are included in normal session saves.
 The old personal fork's `move_split` exchanged panes; use `swap_split` for
 that behavior here.
 
+## Floating terminals (GTK)
+
+Each main tab owns a group of independent floating terminal panels above its
+tiled layout. There is no floating tab strip. A panel has its own geometry,
+title/close row and process. New panels inherit the previous active panel's size
+and appear 24 logical pixels to its right and below, wrapping within the tab
+when an axis has no more room. The first panel uses the configured anchor/size.
+
+Focusing a panel raises it above the others, keeping its terminal widget mapped
+and its process alive. Clicking an exposed panel or its title selects it.
+`focus_float:left|right|up|down` chooses the nearest panel center in that direction.
+At an edge it wraps to the opposite extreme, preferring the same row/column.
+Identically positioned panels use a stable cyclic tie break so each is reachable.
+A single panel still handles focus keys instead of moving focus into the tiles.
+
+The user's guarded Home Manager Lua shortcuts, in both normal and Vim tables:
+
+| Keys | Floating terminal focused | Tiled terminal focused |
+|---|---|---|
+| Alt+HJKL | Directional focus and raise | Existing pane navigation |
+| Alt+Shift+HJKL | Move selected panel | Existing pane swapping |
+| Ctrl+Alt+HJKL | Resize selected panel | Existing pane resizing |
+| Alt+grave | Show/hide the floating group | Show/hide the floating group |
+| Alt+; then F | New floating shell | New floating shell |
+| Alt+; then G | Open/reveal named LazyGit | Open/reveal named LazyGit |
+
+`move_float:left|right|up|down` and `resize_float:left|right|up|down` use 2.5%
+increments of the main tab's content dimensions, constrained to the available
+area. Resizing left/up shrinks width/height, right/down grows them. Focus, move
+and resize actions require a floating terminal as their source and return false
+from tiled panes, allowing the Lua bindings to fall back. There is no adjustment
+mode or key capture: plain arrows, Enter and Escape reach the shell/TUI normally.
+The command palette offers the floating controls, including Reset Floating
+Geometry. The legacy `next_float_tab`/`previous_float_tab` action names remain as
+creation-order panel cycling aliases; they do not create or expose a tab strip.
+No repository default bindings are imposed.
+
+Toggle creates a shell if the group is empty; otherwise it shows/hides all of
+its panels together, retaining the active panel and stacking order. Clicking or
+moving keyboard focus to a tiled terminal hides the whole group. Main-tab
+switching retains each tab's independent group. Hidden processes continue running.
+`hide_float` returns to the last tiled pane. `close_surface` or a panel's close
+button closes that terminal with normal running-process confirmation. Closing
+the active panel selects the next panel in the visual stack. Closing the last
+panel returns to tiles, or closes a scratch-only main tab. Closing the last tiled
+pane keeps the main tab and its floating panels alive; that group stays visible
+until its last panel closes. Main-tab/window close confirmation includes hidden
+floating processes.
+
+The first panel defaults to centered, 70% of content width and 60% of height:
+
+```ini
+gtk-floating-terminal-anchor = center
+gtk-floating-terminal-size = 70%,60%
+```
+
+Size is width, height; each percentage must be greater than zero and at most
+100%. Anchors are `center`, `top`, `bottom`, `left`, `right`, `top-left`,
+`top-right`, `bottom-left` and `bottom-right`, relative to tab content. Minimum
+usable sizes apply when possible; minimum-size expansion preserves anchoring.
+`reset_float` applies current configured defaults to the selected panel only.
+Reload updates defaults without moving existing panels. Saved/manual geometry
+takes precedence. Every panel remains within the tab on resize and scale changes.
+Mouse movement/resizing, docking and floating split groups are not implemented.
+
+`ghostty.float{ surface?, name?, command?, cwd?, title?, wait? }` creates and
+focuses a panel owned by the main tab of `surface` (default `ctx.surface`).
+Command, directory and `wait` semantics match `ghostty.split`. An optional name
+reveals and raises an existing panel in that main tab without sending input,
+restarting it or applying new options. Closing it releases its name. Unnamed calls
+always create another cascading panel. Names are case-sensitive UTF-8, at most
+128 bytes, with no control characters or surrounding whitespace. The limit is
+256 panels per main tab. Split actions are unavailable from floating terminals;
+main-tab and window actions retain their normal scope.
+
+Saved sessions retain each panel's geometry, stacking, name, directory, custom
+title, primary-screen output and scrollback, plus group visibility and selected
+panel. Tiled active-pane and zoom state remain independent. Restore starts fresh
+shells under the existing registered-program relaunch policy; arbitrary Lua
+commands are not replayed. Hidden restored groups initialize lazily when shown,
+retaining previous snapshot generations until then. Earlier manifests without
+floats still load; manifests from the tabbed preview migrate their shared
+rectangle into a cascading group. Quick terminals support panels but remain
+excluded from persistence, as do unsaved windows.
+
+Desktop validation should cover: creating three panels; directional focus,
+wrapping and raising; clicking exposed panels; moving/resizing one without
+changing others; named reuse; hide/show while commands run; main-tab switching;
+closing active/background panels and canceling confirmation; closing the last
+tile; tab transfer; window resizing; tiled zoom; quick terminals; theme/config
+reload; and save/reopen with distinct panel sizes, stacking and hidden groups.
+No isolated screenshot workflow is needed.
+
 ## Storage
 
 `$XDG_STATE_HOME/ghostty/sessions/<application-id>/` contains one `<id>.json`
@@ -409,6 +502,21 @@ nix develop -c zig build run -- \
 ```
 
 The preview application ID keeps its named sessions separate from the installed
-application. The normal configuration still supplies themes and keybindings.
+application. After a ReleaseFast build, a floating-terminal preview can use the
+existing output directly:
+
+```sh
+nix develop -c zig-out/bin/ghostty \
+  --class=com.mitchellh.ghostty.float-preview \
+  --gtk-single-instance=false \
+  --keybind=alt+grave_accent=toggle_float
+```
+
+Alt+grave shows/hides the group; the user's Lua bindings provide Alt+HJKL focus,
+Alt+Shift+HJKL movement and Ctrl+Alt+HJKL resizing while a float is focused. The command palette also exposes
+floating controls. The temporary toggle binding applies to the default key table;
+switch out of a custom key table before trying it.
+
+The normal configuration still supplies themes and keybindings.
 Alternatively, `nix develop -c zig build` installs the development executable at
 `zig-out/bin/ghostty`, which accepts the same flags.

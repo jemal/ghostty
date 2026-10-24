@@ -602,6 +602,25 @@ pub const Action = union(enum) {
     /// Only supported by the GTK runtime.
     toggle_toolbar,
 
+    /// Show or hide this tab's floating terminals (GTK only).
+    toggle_float,
+    /// Hide floating terminals and return to the tiled layout (GTK only).
+    hide_float,
+    /// Focus the nearest floating panel in a direction, wrapping at the edge.
+    /// GTK only; unavailable from tiled panes.
+    focus_float: SplitResizeDirection,
+    /// Move the focused floating panel by 2.5% of the tab content area.
+    /// Only supported by the GTK runtime; unavailable from tiled panes.
+    move_float: SplitResizeDirection,
+    /// Resize the focused floating panel by 2.5% of the tab content area.
+    /// Left/up shrink and right/down grow. GTK only; unavailable from tiles.
+    resize_float: SplitResizeDirection,
+    /// Reset floating geometry (GTK only).
+    reset_float,
+    /// Cycle floating panels in creation order (GTK only). Legacy action names.
+    next_float_tab,
+    previous_float_tab,
+
     /// Open the saved-session picker (GTK only).
     switch_session,
 
@@ -1484,6 +1503,14 @@ pub const Action = union(enum) {
             .move_tab_to_new_window,
             .toggle_tab_overview,
             .toggle_toolbar,
+            .toggle_float,
+            .hide_float,
+            .focus_float,
+            .move_float,
+            .resize_float,
+            .reset_float,
+            .next_float_tab,
+            .previous_float_tab,
             .pick_theme,
             .switch_session,
             .lua,

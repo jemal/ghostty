@@ -61,6 +61,18 @@ pub fn runLua(self: *Self, name: []const u8) bool {
     return Application.default().runLua(name, self.core().id);
 }
 
+pub fn floatingAction(self: *Self, action: @import("../../input/Binding.zig").Action) bool {
+    const tab = @import("ext.zig").getAncestor(
+        @import("class/tab.zig").Tab,
+        self.surface.as(@import("gtk").Widget),
+    ) orelse return false;
+    switch (action) {
+        .focus_float, .move_float, .resize_float => if (!tab.containsFloating(self.surface)) return false,
+        else => {},
+    }
+    return tab.floatingAction(action);
+}
+
 pub fn toggleToolbar(self: *Self) bool {
     const window = @import("ext.zig").getAncestor(
         @import("class/window.zig").Window,

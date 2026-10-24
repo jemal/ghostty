@@ -5663,6 +5663,12 @@ pub fn performBindingAction(self: *Surface, action: input.Binding.Action) !bool 
             return false;
         },
 
+        .toggle_float, .hide_float, .focus_float, .move_float, .resize_float, .reset_float, .next_float_tab, .previous_float_tab => {
+            if (comptime @hasDecl(apprt.Surface, "floatingAction"))
+                return self.rt_surface.floatingAction(action);
+            return false;
+        },
+
         .toggle_toolbar => {
             if (comptime @hasDecl(apprt.Surface, "toggleToolbar"))
                 return self.rt_surface.toggleToolbar();

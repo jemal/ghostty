@@ -196,6 +196,7 @@ pub const SurfaceInfo = struct {
 
 pub const OpenTarget = union(enum) {
     split: Direction,
+    float,
     tab,
     window,
 
@@ -206,6 +207,7 @@ pub const OpenOptions = struct {
     command: ?configpkg.Command = null,
     cwd: ?[:0]const u8 = null,
     title: ?[:0]const u8 = null,
+    name: ?[:0]const u8 = null,
 
     /// Keep the terminal open after the command exits. Null uses the
     /// `wait-after-command` config value.
@@ -731,6 +733,7 @@ fn installApi(self: *Runtime) void {
         .{ "toast", luaToast },
         .{ "log", luaLog },
         .{ "split", luaSplit },
+        .{ "float", luaFloat },
         .{ "tab", luaTab },
         .{ "window", luaWindow },
         .{ "exec", luaExec },
@@ -1067,6 +1070,10 @@ fn luaSurfaceInfo(L: ?*c.lua_State) callconv(.c) c_int {
 }
 
 /// ghostty.split{ surface?, direction?, command?, cwd?, title? } -> true | nil, err
+fn luaFloat(L: ?*c.lua_State) callconv(.c) c_int {
+    return open(L, .float);
+}
+
 fn luaSplit(L: ?*c.lua_State) callconv(.c) c_int {
     return open(L, .split);
 }
@@ -1111,6 +1118,7 @@ fn open(L: ?*c.lua_State, comptime kind: std.meta.Tag(OpenTarget)) c_int {
             break :split .{ .split = std.meta.stringToEnum(OpenTarget.Direction, direction) orelse
                 return pushError(L, "direction must be left, right, up or down") };
         },
+        .float => .float,
         .tab => .tab,
         .window => .window,
     };
@@ -1122,6 +1130,7 @@ fn open(L: ?*c.lua_State, comptime kind: std.meta.Tag(OpenTarget)) c_int {
         error.InvalidCwd => "cwd must be a string",
         error.InvalidTitle => "title must be a string",
         error.InvalidWait => "wait must be a boolean",
+        error.InvalidName => "name must be a non-empty UTF-8 name of at most 128 bytes without control characters",
     });
 
     self.host.open(self.host.ptr, surface, target, options) catch |err| return pushError(L, switch (err) {
@@ -1139,7 +1148,7 @@ fn open(L: ?*c.lua_State, comptime kind: std.meta.Tag(OpenTarget)) c_int {
 fn openOptions(
     L: ?*c.lua_State,
     alloc: Allocator,
-) (Allocator.Error || error{ InvalidCommand, InvalidCwd, InvalidTitle, InvalidWait })!OpenOptions {
+) (Allocator.Error || error{ InvalidCommand, InvalidCwd, InvalidTitle, InvalidWait, InvalidName })!OpenOptions {
     var options: OpenOptions = .{};
 
     options.command = command: {
@@ -1165,6 +1174,7 @@ fn openOptions(
     inline for (.{
         .{ "cwd", error.InvalidCwd },
         .{ "title", error.InvalidTitle },
+        .{ "name", error.InvalidName },
     }) |entry| {
         defer c.lua_settop(L, 1);
         switch (c.lua_getfield(L, 1, entry[0])) {
@@ -1172,6 +1182,10 @@ fn openOptions(
             c.LUA_TSTRING => @field(options, entry[0]) = try alloc.dupeSentinel(u8, toString(L, -1), 0),
             else => return entry[1],
         }
+    }
+
+    if (options.name) |name| {
+        if (!@import("../session.zig").validName(name)) return error.InvalidName;
     }
 
     options.wait = wait: {
@@ -1497,6 +1511,7 @@ const TestHost = struct {
         first_arg: [32]u8,
         cwd: [32]u8,
         wait: ?bool,
+        name: [129]u8,
     } = null,
 
     /// The text of the last toast.
@@ -1592,6 +1607,7 @@ const TestHost = struct {
             .first_arg = @splat(0),
             .cwd = @splat(0),
             .wait = options.wait,
+            .name = @splat(0),
         };
         const opened = &self.opened.?;
         if (options.command) |command| switch (command) {
@@ -1602,6 +1618,7 @@ const TestHost = struct {
             .shell => |shell| @memcpy(opened.first_arg[0..shell.len], shell),
         };
         if (options.cwd) |cwd| @memcpy(opened.cwd[0..cwd.len], cwd);
+        if (options.name) |name| @memcpy(opened.name[0..name.len], name);
     }
 
     fn invoke(ptr: *anyopaque, _: u64, action: input.Binding.Action) bool {
@@ -2118,4 +2135,36 @@ test "waiting fails outside the task coroutine" {
     try testing.expect(rt.run("yield", 7));
     try testing.expectEqual(@as(usize, 1), host.toasts);
     try testing.expectEqual(@as(usize, 0), rt.tasks.count());
+}
+
+test "floating Lua commands pass names and options and reject invalid names" {
+    const testing = std.testing;
+    var host: TestHost = .{};
+    const rt = try create(testing.allocator, host.host());
+    defer rt.destroy();
+    try testLoad(rt,
+        \\assert(ghostty.float{} == nil)
+        \\ghostty.action{ name = "float", run = function()
+        \\  assert(ghostty.float{ name = "tests", command = { "cargo", "test" }, cwd = "/src", wait = true })
+        \\end }
+        \\ghostty.action{ name = "unnamed", run = function() assert(ghostty.float{}) end }
+        \\ghostty.action{ name = "bad", run = function()
+        \\  assert(ghostty.float{ name = "" } == nil)
+        \\  assert(ghostty.float{ name = "bad\nname" } == nil)
+        \\  assert(ghostty.float{ name = string.rep("x", 129) } == nil)
+        \\  assert(ghostty.float{ name = 42 } == nil)
+        \\  assert(ghostty.float{ surface = 8 } == nil)
+        \\end }
+    );
+    try testing.expect(rt.run("float", 7));
+    try testing.expectEqual(OpenTarget.float, host.opened.?.target);
+    try testing.expectEqualStrings("tests", std.mem.sliceTo(&host.opened.?.name, 0));
+    try testing.expectEqualStrings("cargo", std.mem.sliceTo(&host.opened.?.first_arg, 0));
+    try testing.expectEqualStrings("/src", std.mem.sliceTo(&host.opened.?.cwd, 0));
+    try testing.expectEqual(@as(?bool, true), host.opened.?.wait);
+    try testing.expect(rt.run("unnamed", 7));
+    try testing.expectEqualStrings("", std.mem.sliceTo(&host.opened.?.name, 0));
+    try testing.expect(rt.run("bad", 7));
+    try testing.expectEqualStrings("", std.mem.sliceTo(&host.last_toast, 0));
+    try testing.expectEqual(@as(usize, 0), host.toasts);
 }

@@ -918,84 +918,93 @@ pub const Window = extern struct {
         self: *Self,
         tree: *const Surface.Tree,
     ) void {
-        const priv = self.private();
         var it = tree.iterator();
-        while (it.next()) |entry| {
-            const surface = entry.view;
-            surface.applyTheme(priv.theme.appearance) catch |err| log.warn("applying window theme: {}", .{err});
-            // Before adding any new signal handlers, disconnect any that we may
-            // have added before. Otherwise we may get multiple handlers for the
-            // same signal.
-            _ = gobject.signalHandlersDisconnectMatched(
-                surface.as(gobject.Object),
-                .{ .data = true },
-                0,
-                0,
-                null,
-                null,
-                self,
-            );
+        while (it.next()) |entry| self.connectSurfaceHandler(entry.view);
+    }
 
-            _ = Surface.signals.init.connect(surface, *Self, themeSurfaceInitialized, self, .{});
-            _ = Surface.signals.@"present-request".connect(
-                surface,
-                *Self,
-                surfacePresentRequest,
-                self,
-                .{},
-            );
-            _ = Surface.signals.@"clipboard-write".connect(
-                surface,
-                *Self,
-                surfaceClipboardWrite,
-                self,
-                .{},
-            );
-            _ = Surface.signals.menu.connect(
-                surface,
-                *Self,
-                surfaceMenu,
-                self,
-                .{},
-            );
-            _ = Surface.signals.@"toggle-fullscreen".connect(
-                surface,
-                *Self,
-                surfaceToggleFullscreen,
-                self,
-                .{},
-            );
-            _ = Surface.signals.@"toggle-maximize".connect(
-                surface,
-                *Self,
-                surfaceToggleMaximize,
-                self,
-                .{},
-            );
+    fn connectSurfaceHandler(self: *Self, surface: *Surface) void {
+        const priv = self.private();
+        surface.applyTheme(priv.theme.appearance) catch |err| log.warn("applying window theme: {}", .{err});
+        // Before adding any new signal handlers, disconnect any that we may
+        // have added before. Otherwise we may get multiple handlers for the
+        // same signal.
+        _ = gobject.signalHandlersDisconnectMatched(
+            surface.as(gobject.Object),
+            .{ .data = true },
+            0,
+            0,
+            null,
+            null,
+            self,
+        );
 
-            // If we've never had a surface initialize yet, then we register
-            // this signal. Its theoretically possible to launch multiple surfaces
-            // before init so we could register this on multiple and that is not
-            // a problem because we'll check the flag again in each handler.
-            if (!priv.surface_init) {
-                _ = Surface.signals.init.connect(
-                    surface,
-                    *Self,
-                    surfaceInit,
-                    self,
-                    .{},
-                );
-            }
-            if (priv.session_surface_pending) {
-                _ = Surface.signals.init.connect(
-                    surface,
-                    *Self,
-                    restoredSurfaceInitialized,
-                    self,
-                    .{},
-                );
-            }
+        _ = Surface.signals.init.connect(surface, *Self, themeSurfaceInitialized, self, .{});
+        _ = Surface.signals.@"present-request".connect(
+            surface,
+            *Self,
+            surfacePresentRequest,
+            self,
+            .{},
+        );
+        _ = Surface.signals.@"clipboard-write".connect(
+            surface,
+            *Self,
+            surfaceClipboardWrite,
+            self,
+            .{},
+        );
+        _ = Surface.signals.menu.connect(
+            surface,
+            *Self,
+            surfaceMenu,
+            self,
+            .{},
+        );
+        _ = Surface.signals.@"toggle-fullscreen".connect(
+            surface,
+            *Self,
+            surfaceToggleFullscreen,
+            self,
+            .{},
+        );
+        _ = Surface.signals.@"toggle-maximize".connect(
+            surface,
+            *Self,
+            surfaceToggleMaximize,
+            self,
+            .{},
+        );
+
+        // If we've never had a surface initialize yet, then we register
+        // this signal. Its theoretically possible to launch multiple surfaces
+        // before init so we could register this on multiple and that is not
+        // a problem because we'll check the flag again in each handler.
+        if (!priv.surface_init) {
+            _ = Surface.signals.init.connect(
+                surface,
+                *Self,
+                surfaceInit,
+                self,
+                .{},
+            );
         }
+        if (priv.session_surface_pending) {
+            _ = Surface.signals.init.connect(
+                surface,
+                *Self,
+                restoredSurfaceInitialized,
+                self,
+                .{},
+            );
+        }
+    }
+
+    fn floatingAdded(_: *Tab, surface: *Surface, self: *Self) callconv(.c) void {
+        self.connectSurfaceHandler(surface);
+    }
+
+    fn floatingRemoved(_: *Tab, surface: *Surface, self: *Self) callconv(.c) void {
+        _ = gobject.signalHandlersDisconnectMatched(surface.as(gobject.Object), .{ .data = true }, 0, 0, null, null, self);
     }
 
     fn restoredSurfaceInitialized(_: *Surface, self: *Self) callconv(.c) void {
@@ -1005,7 +1014,16 @@ pub const Window = extern struct {
     /// Restored widgets exist before GTK allocates and initializes their cores.
     /// Losing the old window's last core during that gap must not quit the app.
     pub fn hasPendingSessionSurface(self: *Self) bool {
-        return self.private().session_surface_pending;
+        if (self.private().session_surface_pending) return true;
+        // Closing the last tiled pane can reveal a lazily initialized float.
+        // Keep the application alive until GTK gives it an allocation.
+        const view = self.getTabView();
+        for (0..@intCast(view.getNPages())) |index| {
+            const tab = gobject.ext.cast(Tab, view.getNthPage(@intCast(index)).getChild()) orelse continue;
+            if (tab.floatingCount() == 0) continue;
+            if (tab.getActiveSurface()) |surface| if (surface.core() == null) return true;
+        }
+        return false;
     }
 
     /// Disconnect all the surface handlers for the given tree. This should
@@ -1111,7 +1129,10 @@ pub const Window = extern struct {
         for (0..@intCast(priv.tab_view.getNPages())) |i| {
             const page = priv.tab_view.getNthPage(@intCast(i));
             const tab = gobject.ext.cast(Tab, page.getChild()) orelse continue;
-            const tree = tab.getSurfaceTree() orelse continue;
+            const tree = tab.getSurfaceTree() orelse &Surface.Tree.empty;
+            // Closing the final terminal can briefly leave an empty tab before
+            // its close-request removes the page. It is not a restorable layout.
+            if (tree.isEmpty() and tab.floatingCount() == 0) continue;
             if (page == priv.tab_view.getSelectedPage()) selected = tabs.items.len;
             const nodes = try alloc.alloc(sessions.Node, tree.nodes.len);
             for (tree.nodes, nodes) |node, *out| out.* = switch (node) {
@@ -1132,8 +1153,31 @@ pub const Window = extern struct {
                     .right = @intCast(split.right.idx()),
                 } },
             };
-            const active = if (tab.getActiveSurface()) |s| tree.locate(s) else null;
+            const active = if (tab.getSplitTree().getActiveSurface()) |surface| tree.locate(surface) else null;
+            const floating = try alloc.alloc(sessions.Floating, tab.floatingCount());
+            for (floating, 0..) |*out, index| {
+                const surface = tab.floatingSurface(index);
+                out.* = .{
+                    .name = if (tab.floatingName(surface)) |name| try alloc.dupeSentinel(u8, name, 0) else null,
+                    .geometry = tab.floatingGeometryFor(surface),
+                    .stacking = tab.floatingStackIndex(surface),
+                    .pane = .{ .leaf = .{
+                        .id = surface.sessionId(),
+                        .snapshot = surface.sessionSnapshotId(),
+                        .relaunch = try surface.captureSessionRelaunch(alloc),
+                        .working_directory = if (surface.getSessionWorkingDirectory()) |pwd|
+                            if (std.fs.path.isAbsolute(pwd)) try alloc.dupeSentinel(u8, pwd, 0) else null
+                        else
+                            null,
+                        .title = if (surface.getTitleOverride()) |title| try alloc.dupeSentinel(u8, title, 0) else null,
+                    } },
+                };
+            }
             try tabs.append(alloc, .{
+                .floating = floating,
+                .floating_selected = tab.floatingSelected(),
+                .floating_visible = tab.floatingVisible(),
+                .floating_geometry = tab.floatingGeometry(),
                 .title = if (tab.getTitleOverride()) |t| try alloc.dupeSentinel(u8, t, 0) else null,
                 .nodes = nodes,
                 .active = if (active) |h| @intCast(h.idx()) else firstLeaf(tree),
@@ -1157,7 +1201,7 @@ pub const Window = extern struct {
 
     fn firstLeaf(tree: *const Surface.Tree) u32 {
         var it = tree.iterator();
-        return @intCast(it.next().?.handle.idx());
+        return if (it.next()) |entry| @intCast(entry.handle.idx()) else 0;
     }
 
     pub fn sessionHash(self: *Self) ?u64 {
@@ -1186,7 +1230,12 @@ pub const Window = extern struct {
             const page = window.newTabPage(null, .tab, .none);
             const tab = gobject.ext.cast(Tab, page.getChild()).?;
             const widget = tab.getSplitTree();
-            var tree = try restoreSessionNode(widget, manifest.id, saved.nodes, 0);
+            for (saved.floating) |floating| {
+                const surface = try restoreSessionSurface(manifest.id, floating.pane.leaf);
+                defer surface.unref();
+                try tab.addFloating(surface, floating.name);
+            }
+            var tree = if (saved.nodes.len > 0) try restoreSessionNode(widget, manifest.id, saved.nodes, 0) else Surface.Tree.empty;
             defer tree.deinit();
             var active: ?*Surface = null;
             var it = tree.iterator();
@@ -1199,6 +1248,7 @@ pub const Window = extern struct {
             if (active) |s| widget.setActiveSurface(s);
             widget.setTree(&tree);
             tab.setTitleOverride(saved.title);
+            tab.restoreFloatingState(saved);
         }
         priv.tab_view.setSelectedPage(priv.tab_view.getNthPage(@intCast(manifest.selected_tab)));
         return window;
@@ -1328,40 +1378,46 @@ pub const Window = extern struct {
         self.emitSessionOpened();
     }
 
+    fn restoreSessionSurface(session_id: u64, leaf: @FieldType(sessions.Node, "leaf")) std.mem.Allocator.Error!*Surface {
+        var relaunch = leaf.relaunch;
+        if (relaunch) |record| {
+            if (!record.valid() or !Application.default().sessionRelaunchAllowed(record.program)) relaunch = null;
+        }
+        const cwd = cwd: {
+            if (relaunch) |record| {
+                if (std.Io.Dir.cwd().openDir(global.io(), record.cwd, .{})) |dir| {
+                    dir.close(global.io());
+                    break :cwd record.cwd;
+                } else |_| relaunch = null;
+            }
+            const path = leaf.working_directory orelse break :cwd null;
+            const dir = std.Io.Dir.cwd().openDir(global.io(), path, .{}) catch {
+                log.warn("session directory no longer available: {s}", .{path});
+                break :cwd null;
+            };
+            dir.close(global.io());
+            break :cwd path;
+        };
+        const surface: *Surface = .new(.{
+            .command = null,
+            .shell_integration = null,
+            .working_directory = cwd,
+            .title = leaf.title,
+        });
+        _ = surface.refSink();
+        errdefer surface.unref();
+        surface.restoreSessionId(leaf.id);
+        surface.restoreSessionSnapshot(session_id, leaf.snapshot);
+        if (relaunch) |record| try surface.restoreSessionRelaunch(record);
+        return surface;
+    }
+
     fn restoreSessionNode(widget: *SplitTree, session_id: u64, nodes: []const sessions.Node, index: u32) std.mem.Allocator.Error!Surface.Tree {
         const alloc = Application.default().allocator();
         switch (nodes[index]) {
             .leaf => |leaf| {
-                var relaunch = leaf.relaunch;
-                if (relaunch) |record| {
-                    if (!record.valid() or !Application.default().sessionRelaunchAllowed(record.program)) relaunch = null;
-                }
-                const cwd = cwd: {
-                    if (relaunch) |record| {
-                        if (std.Io.Dir.cwd().openDir(global.io(), record.cwd, .{})) |dir| {
-                            dir.close(global.io());
-                            break :cwd record.cwd;
-                        } else |_| relaunch = null;
-                    }
-                    const path = leaf.working_directory orelse break :cwd null;
-                    const dir = std.Io.Dir.cwd().openDir(global.io(), path, .{}) catch {
-                        log.warn("session directory no longer available: {s}", .{path});
-                        break :cwd null;
-                    };
-                    dir.close(global.io());
-                    break :cwd path;
-                };
-                const surface: *Surface = .new(.{
-                    .command = null,
-                    .shell_integration = null,
-                    .working_directory = cwd,
-                    .title = leaf.title,
-                });
-                _ = surface.refSink();
+                const surface = try restoreSessionSurface(session_id, leaf);
                 defer surface.unref();
-                surface.restoreSessionId(leaf.id);
-                surface.restoreSessionSnapshot(session_id, leaf.snapshot);
-                if (relaunch) |record| try surface.restoreSessionRelaunch(record);
                 surface.bindIsSplit(widget);
                 return Surface.Tree.init(alloc, surface);
             },
@@ -2158,10 +2214,8 @@ pub const Window = extern struct {
         self: *Self,
     ) callconv(.c) void {
         const tab = self.getSelectedTab() orelse return;
-        const tree = tab.getSurfaceTree() orelse return;
-
-        var it = tree.iterator();
-        while (it.next()) |entry| entry.view.updateOcclusion();
+        var it = tab.surfaces();
+        while (it.next()) |surface| surface.updateOcclusion();
     }
 
     fn btnNewTab(_: *adw.SplitButton, self: *Self) callconv(.c) void {
@@ -2409,6 +2463,10 @@ pub const Window = extern struct {
             self.connectSurfaceHandlers(tree);
         }
 
+        for (0..tab.floatingCount()) |index| self.connectSurfaceHandler(tab.floatingSurface(index));
+        _ = Tab.signals.@"floating-added".connect(tab, *Self, floatingAdded, self, .{});
+        _ = Tab.signals.@"floating-removed".connect(tab, *Self, floatingRemoved, self, .{});
+
         // Keep our surface handlers in sync as the tree changes. This is
         // connected here rather than when the tab is created so that tabs
         // moved between windows notify the window that they are in.
@@ -2451,6 +2509,8 @@ pub const Window = extern struct {
             null,
             self,
         );
+
+        for (0..tab.floatingCount()) |index| floatingRemoved(tab, tab.floatingSurface(index), self);
 
         // Remove the tree handlers
         if (tab.getSurfaceTree()) |tree| {
@@ -2585,6 +2645,8 @@ pub const Window = extern struct {
         const page = tab_view.getPage(tab.as(gtk.Widget));
         tab_view.setSelectedPage(page);
 
+        // Reveal the owning floating tab for notifications and IPC targeting.
+        if (tab.containsFloating(surface)) tab.presentFloating(surface);
         // Grab focus
         surface.grabFocus();
 

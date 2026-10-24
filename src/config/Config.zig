@@ -3859,6 +3859,25 @@ else
 /// Changes take effect when the configuration is reloaded. GTK only.
 @"gtk-tabs-style": GtkTabsStyle = .native,
 
+/// Anchor for a main tab's first floating panel and for `reset_float`. Valid values
+/// are `center`, `top`, `bottom`, `left`, `right`, `top-left`, `top-right`,
+/// `bottom-left`, and `bottom-right`. Edges refer to the tab's content area.
+///
+/// The default is `center`. Used when first opening an empty floating group and by
+/// `reset_float`. Saved/session or manually adjusted geometry takes precedence.
+/// Reloading config changes the defaults without moving existing panels. GTK only.
+@"gtk-floating-terminal-anchor": @import("FloatSize.zig").Anchor = .center,
+
+/// Initial floating panel width and height as percentages of the main tab's
+/// content area, in that order. Both dimensions are required and must be greater
+/// than 0% and at most 100%. For example: `80%,65%`.
+///
+/// The default is `70%,60%`, centered by `gtk-floating-terminal-anchor`.
+/// A usable minimum size applies when space permits, and the panel always
+/// fits inside the tab. Used on first open and by `reset_float`; saved or manual
+/// geometry takes precedence. GTK only.
+@"gtk-floating-terminal-size": @import("FloatSize.zig") = .{},
+
 /// Whether GTK window toolbars are shown initially. Set to `false` to hide
 /// the headerbar and tab bar, leaving more room for the terminal. Window-manager
 /// decorations are controlled separately by `window-decoration`.

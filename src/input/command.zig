@@ -465,6 +465,105 @@ fn actionCommands(action: Action.Key) []const Command {
             .description = i18n.N_("Preview and choose a theme for this window (GTK only)."),
         }},
 
+        .toggle_float => comptime &.{.{
+            .action = .toggle_float,
+            .title = i18n.N_("Toggle Floating Terminals"),
+            .description = i18n.N_("Show or hide the floating terminals in this tab."),
+        }},
+
+        .hide_float => comptime &.{.{
+            .action = .hide_float,
+            .title = i18n.N_("Return to Tiled Terminals"),
+            .description = i18n.N_("Hide floating terminals and focus the tiled layout."),
+        }},
+
+        .focus_float => comptime &.{
+            .{
+                .action = .{ .focus_float = .left },
+                .title = i18n.N_("Focus Floating Panel: Left"),
+                .description = i18n.N_("Focus and raise the nearest floating panel left, wrapping at the edge."),
+            },
+            .{
+                .action = .{ .focus_float = .right },
+                .title = i18n.N_("Focus Floating Panel: Right"),
+                .description = i18n.N_("Focus and raise the nearest floating panel right, wrapping at the edge."),
+            },
+            .{
+                .action = .{ .focus_float = .up },
+                .title = i18n.N_("Focus Floating Panel: Up"),
+                .description = i18n.N_("Focus and raise the nearest floating panel up, wrapping at the edge."),
+            },
+            .{
+                .action = .{ .focus_float = .down },
+                .title = i18n.N_("Focus Floating Panel: Down"),
+                .description = i18n.N_("Focus and raise the nearest floating panel down, wrapping at the edge."),
+            },
+        },
+
+        .move_float => comptime &.{
+            .{
+                .action = .{ .move_float = .left },
+                .title = i18n.N_("Move Floating Terminal: Left"),
+                .description = i18n.N_("Move the focused floating container left."),
+            },
+            .{
+                .action = .{ .move_float = .right },
+                .title = i18n.N_("Move Floating Terminal: Right"),
+                .description = i18n.N_("Move the focused floating container right."),
+            },
+            .{
+                .action = .{ .move_float = .up },
+                .title = i18n.N_("Move Floating Terminal: Up"),
+                .description = i18n.N_("Move the focused floating container up."),
+            },
+            .{
+                .action = .{ .move_float = .down },
+                .title = i18n.N_("Move Floating Terminal: Down"),
+                .description = i18n.N_("Move the focused floating container down."),
+            },
+        },
+
+        .resize_float => comptime &.{
+            .{
+                .action = .{ .resize_float = .left },
+                .title = i18n.N_("Resize Floating Terminal: Left"),
+                .description = i18n.N_("Shrink the floating width."),
+            },
+            .{
+                .action = .{ .resize_float = .right },
+                .title = i18n.N_("Resize Floating Terminal: Right"),
+                .description = i18n.N_("Grow the floating width."),
+            },
+            .{
+                .action = .{ .resize_float = .up },
+                .title = i18n.N_("Resize Floating Terminal: Up"),
+                .description = i18n.N_("Shrink the floating height."),
+            },
+            .{
+                .action = .{ .resize_float = .down },
+                .title = i18n.N_("Resize Floating Terminal: Down"),
+                .description = i18n.N_("Grow the floating height."),
+            },
+        },
+
+        .reset_float => comptime &.{.{
+            .action = .reset_float,
+            .title = i18n.N_("Reset Floating Geometry"),
+            .description = i18n.N_("Apply the configured floating anchor and size."),
+        }},
+
+        .next_float_tab => comptime &.{.{
+            .action = .next_float_tab,
+            .title = i18n.N_("Next Floating Panel"),
+            .description = i18n.N_("Focus and raise the next floating terminal."),
+        }},
+
+        .previous_float_tab => comptime &.{.{
+            .action = .previous_float_tab,
+            .title = i18n.N_("Previous Floating Panel"),
+            .description = i18n.N_("Focus and raise the previous floating terminal."),
+        }},
+
         .toggle_toolbar => comptime &.{.{
             .action = .toggle_toolbar,
             .title = i18n.N_("Toggle Toolbar"),

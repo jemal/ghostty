@@ -41,7 +41,7 @@ pub fn write(writer: *std.Io.Writer, config: *const Config, selector: []const u8
         \\{s} tabbar.compact-tabs .box scrolledwindow {{
         \\  background: var(--ghostty-rail-bg);
         \\}}
-        \\{s} .native-picker {{
+        \\{s} :is(.native-picker, .floating-terminal) {{
         \\  background: var(--ghostty-raised-bg);
         \\  color: var(--ghostty-fg);
         \\}}

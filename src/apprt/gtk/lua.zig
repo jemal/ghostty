@@ -478,6 +478,11 @@ fn open(
     };
 
     switch (target) {
+        .float => {
+            const surface = (parent orelse return error.NoSurface).rt_surface.surface;
+            const tab = ext.getAncestor(@import("class/tab.zig").Tab, surface.as(gtk.Widget)) orelse return error.OpenFailed;
+            try tab.openFloating(surface, overrides, options.name);
+        },
         .split => |direction| {
             const surface = (parent orelse return error.NoSurface).rt_surface.surface;
             const tree = ext.getAncestor(SplitTree, surface.as(gtk.Widget)) orelse

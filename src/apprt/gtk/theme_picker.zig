@@ -76,9 +76,8 @@ pub const State = struct {
         var i: c_int = 0;
         while (i < view.getNPages()) : (i += 1) {
             const tab = gobject.ext.cast(Tab, view.getNthPage(i).getChild()) orelse continue;
-            const tree = tab.getSurfaceTree() orelse continue;
-            var it = tree.iterator();
-            while (it.next()) |entry| try entry.view.applyTheme(self.appearance);
+            var it = tab.surfaces();
+            while (it.next()) |surface| try surface.applyTheme(self.appearance);
         }
     }
 

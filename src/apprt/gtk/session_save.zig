@@ -65,15 +65,17 @@ pub fn create(app: *Application, index_hash: ?u64) !*Self {
         const view = window.getTabView();
         for (0..@intCast(view.getNPages())) |i| {
             const tab = gobject.ext.cast(Tab, view.getNthPage(@intCast(i)).getChild()) orelse continue;
-            const tree = tab.getSurfaceTree() orelse continue;
-            var it = tree.iterator();
-            while (it.next()) |entry| {
+            var it = tab.surfaces();
+            while (it.next()) |surface| {
                 const node = node: for (manifest.tabs) |saved_tab| {
                     for (@constCast(saved_tab.nodes)) |*node| {
-                        if (node.* == .leaf and node.leaf.id == entry.view.sessionId()) break :node node;
+                        if (node.* == .leaf and node.leaf.id == surface.sessionId()) break :node node;
+                    }
+                    for (@constCast(saved_tab.floating)) |*floating| {
+                        if (floating.pane.leaf.id == surface.sessionId()) break :node &floating.pane;
                     }
                 } else unreachable;
-                try panes.append(arena, .{ .widget = entry.view, .core = entry.view.core(), .node = node });
+                try panes.append(arena, .{ .widget = surface, .core = surface.core(), .node = node });
             }
         }
         try self.windows.append(arena, .{

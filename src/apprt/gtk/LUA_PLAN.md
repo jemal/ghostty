@@ -79,6 +79,47 @@ end)
 A global clock replaces any window-specific text on its next tick; compose
 clock and event information in one Lua function if both should remain visible.
 
+## Floating command terminals
+
+`ghostty.float{ surface?, name?, command?, cwd?, title?, wait? }` opens a terminal
+in a floating panel owned by the main tab of `surface` (default `ctx.surface`).
+New panels cascade slightly from the previous active panel. Each panel retains
+its own geometry; Alt+HJKL selects directionally with wrapping, Alt+Shift+HJKL
+moves, and Ctrl+Alt+HJKL resizes through the user's contextual Lua bindings.
+A command list runs directly, matching `ghostty.split`; a string runs through
+the shell. `wait = true` retains output after command exit.
+An optional `name` reveals and selects an existing floating panel in that
+main tab, ignoring new command/options while it exists. Without a name, every
+call creates another floating panel. Closing it releases the name.
+Returns `true`, or `nil, err`. The existing delayed surface initialization rules
+apply; no new surface ID is returned.
+
+```lua
+ghostty.action{
+  name = "git_float",
+  title = "Git (floating)",
+  run = function(ctx)
+    local info = assert(ghostty.surface.info(ctx.surface))
+    return ghostty.float{
+      name = "lazygit",
+      command = { "lazygit" },
+      cwd = (info.foreground and info.foreground.cwd) or info.pwd,
+      title = "Git",
+      wait = false,
+    }
+  end,
+}
+
+-- In a project action, keep each test run as a separate floating panel:
+-- ghostty.float{ command = { "cargo", "test" }, cwd = root, wait = true }
+```
+
+The command inherits Ghostty's environment, just like Lua split/tab launches.
+Use an explicit devshell wrapper when needed. Restored floating terminals follow
+the existing fresh-shell/registered-program policy; this does not replay arbitrary
+Lua commands. Controls, lifecycle and persistence are documented in
+[SESSION_RESTORE.md](SESSION_RESTORE.md#floating-terminals-gtk).
+
 ## Phase 3: what exists now
 
 Program relaunch is implemented and desktop-approved (2026-10-23): load-time

@@ -393,3 +393,26 @@ label.resize-overlay {
   background: var(--accent-bg-color);
   color: var(--accent-fg-color);
 }
+
+/* Independent floating panels, grouped by their owning main tab. */
+.floating-terminal {
+  background: var(--window-bg-color);
+  color: var(--window-fg-color);
+  border: 1px solid color-mix(in srgb, currentColor 22%, transparent);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+
+.floating-terminal.active {
+  border-color: var(--accent-color);
+}
+
+.floating-titlebar {
+  background: color-mix(in srgb, currentColor 5%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+}
+
+.floating-titlebar button {
+  padding: 2px 6px;
+  min-height: 22px;
+}

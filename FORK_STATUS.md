@@ -6,6 +6,45 @@ This document records the work completed across the development chats, the curre
 
 ## Current checkpoint
 
+- Installed and desktop-approved on 2026-10-23: per-tab floating terminals
+  are recorded in jj change `lptzpuoy`. The user tried the tabbed container and requested
+  independent floating panels instead, approving directional focus with wrapping.
+  Each main tab now owns a group of panels, each with its own geometry, title/
+  close row and process. New panels cascade 24 logical pixels from the previous
+  active panel, constrained to content. Focus raises a panel without reparenting
+  or restarting it. Named Lua launches reveal/raise an existing panel; unnamed
+  launches create another. The group hides/shows together, and clicking/focusing
+  tiles hides it. Main-tab changes retain each group's visibility and selection.
+  The user's guarded Home Manager `init.lua` supplies Alt+HJKL directional focus
+  (tiled navigation fallback), Alt+Shift+HJKL movement (tiled swapping fallback),
+  Ctrl+Alt+HJKL resizing (tiled resizing fallback), Alt+grave toggle, Alt+; then F
+  for a fresh shell, and Alt+; then G for named LazyGit, in normal and Vim tables.
+  Adjustment mode and the floating tab strip are removed. Move/resize steps are
+  2.5%; plain arrows/Enter/Escape reach applications. The command palette exposes
+  controls; no repository default bindings were imposed.
+  Saved sessions retain individual geometry and stacking, names, output, group
+  visibility/selection and existing registered-program relaunch records. Earlier
+  tabbed-preview records migrate to cascading panels. Hidden processes participate
+  in confirmation, snapshots, themes and main-tab transfers. Scratch-only tabs
+  remain alive. Defaults use `gtk-floating-terminal-anchor = center` and
+  `gtk-floating-terminal-size = 70%,60%`; reset applies them to the selected panel.
+  Saved/manual geometry wins over defaults. Mouse adjustment, docking and floating
+  split groups remain deferred. Home Manager edits preserve configuration links.
+  The original tabbed/placement implementation passed GTK ReleaseFast builds,
+  formatting, 123 focused Lua/session tests (one Fish skip) and 85 placement tests.
+  Independent-panel geometry, directional focus/wrapping, cascade and persistence
+  tests pass in the standalone session suite (17 passed, one existing Fish skip).
+  Final panel validation: GTK ReleaseFast build with system Fontconfig passed;
+  the focused floating/session run passed 112 tests with one existing Fish skip.
+  Zig formatting, Lua syntax, contextual shortcut/fallback checks and preserved
+  Home Manager link targets were verified.
+  The user approved the panel redesign on the normal desktop and requested
+  review, installation and a commit. Review found no blocking issues. The final
+  floating/session/Lua run passed 115 tests with one existing Fish skip; Zig
+  formatting, Lua syntax and shortcut fallback checks passed. Installed
+  ReleaseFast with system Fontconfig to `~/.local`; running terminals were not
+  restarted. Extended lifecycle/restore UI testing is not claimed. See
+  `src/apprt/gtk/SESSION_RESTORE.md` and `src/apprt/gtk/LUA_PLAN.md` for behavior.
 - Installed on 2026-10-23: Lua phase 4 events and titlebar status. The user
   approved the final titlebar layout on the desktop before installation.
   `ghostty.on` supports surface creation/closure, directory/title changes,
@@ -93,8 +132,8 @@ This document records the work completed across the development chats, the curre
   commits are not pushed yet.
 - Commit messages have no `Co-Authored-By` line (user rule).
 - Next session: read this file, `src/apprt/gtk/SESSION_RESTORE.md` and
-  `src/apprt/gtk/LUA_PLAN.md`, then `jj status`. Open approved work: floating
-  scratch terminal. Lua phase 4 events and titlebar status are implemented.
+  `src/apprt/gtk/LUA_PLAN.md`, then `jj status`. Independent floating panels
+  and Lua phase 4 events/titlebar status are installed and desktop-approved.
   Explored ideas are listed under
   "New ideas from 2026-10-23".
 - The old feature bookmarks were removed; their commits remain in `folie`.
@@ -502,11 +541,16 @@ There is no unfinished implementation from the approved picker plan. The followi
 
 Possible small UI improvements include tooltips for truncated choice text and an optional result count on long lists. Further permanent chrome should be justified by an actual workflow problem.
 
-### Floating terminals: exploratory proposal
+### Floating terminals: original exploratory proposal
 
-Floating panes were discussed after completing the picker. No floating-pane implementation or detailed design has been approved.
+The original proposal below was refined in discussion on 2026-10-23. The user
+approved per-tab floating terminals, direct Lua command launches, optional named reuse,
+and keyboard controls. After trying the tabbed prototype, the user approved
+independent cascading panels and directional focus with wrapping. That version
+is installed and desktop-approved; see the
+current checkpoint and `src/apprt/gtk/SESSION_RESTORE.md` for actual behavior.
 
-The proposed starting point is one tab-owned scratch terminal that floats above the tiled layout:
+The initial proposal was one tab-owned scratch terminal above the tiled layout:
 
 - A shortcut shows or hides it; hiding preserves its running process.
 - Sensible default geometry, restrained border/shadow, and clear focus indication.
@@ -516,7 +560,7 @@ The proposed starting point is one tab-owned scratch terminal that floats above 
 
 This is a real terminal-layout feature, not an extension of the picker widget. It needs ownership outside the existing tiled split tree, correct command/input routing, lifecycle handling, and persistence. It does not itself require a daemon.
 
-A later stage could float an existing pane and dock it again while preserving its process. Multiple floats, stacking controls, snapping, and floating split groups would be a substantially larger feature.
+A later stage could float an existing pane and dock it again while preserving its process. Independent panels and focus-based stacking are implemented; explicit stacking controls, snapping, and floating split groups remain deferred.
 
 ### Deliberately deferred ideas
 
@@ -632,6 +676,7 @@ upstream; `main` tracks `main@origin`. Never push `folie` to `origin`.
 | `rypyunky` | gtk: relaunch registered programs when restoring sessions |
 | `kypvvzst` | gtk: configure session relaunch commands in Lua |
 | `upyuptwx` | gtk: add Lua events and titlebar status |
+| `lptzpuoy` | gtk: add per-tab floating terminal panels |
 
 ## Related implementation documentation
 

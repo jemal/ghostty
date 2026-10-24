@@ -899,6 +899,7 @@ pub const SplitTree = extern struct {
         // the surface is destroyed.
         if (!surface.getFocused()) return;
         self.private().last_focused.set(surface);
+        if (ext.getAncestor(@import("tab.zig").Tab, self.as(gtk.Widget))) |tab| tab.tiledFocused();
 
         // Our active surface probably changed
         self.as(gobject.Object).notifyByPspec(properties.@"active-surface".impl.param_spec);
@@ -990,10 +991,10 @@ pub const SplitTree = extern struct {
 
         // Replacing our tree widget hierarchy can reset focus state.
         // If we have a last-focused surface, restore focus to it.
-        if (priv.last_focused.get()) |v| {
+        if (!self.restoreFloatingFocus()) if (priv.last_focused.get()) |v| {
             defer v.unref();
             v.grabFocus();
-        }
+        };
 
         // Our split status may have changed
         self.as(gobject.Object).notifyByPspec(properties.@"is-split".impl.param_spec);
@@ -1004,12 +1005,19 @@ pub const SplitTree = extern struct {
         return 0;
     }
 
+    fn restoreFloatingFocus(self: *Self) bool {
+        const tab = ext.getAncestor(@import("tab.zig").Tab, self.as(gtk.Widget)) orelse return false;
+        return tab.restoreFloatingFocus();
+    }
+
     fn onRestoreFocus(ud: ?*anyopaque) callconv(.c) c_int {
         const self: *Self = @ptrCast(@alignCast(ud orelse return 0));
 
         // Always mark our source as null since we're done.
         const priv = self.private();
         priv.restore_focus_source = null;
+
+        if (self.restoreFloatingFocus()) return 0;
 
         // If we have a last-focused surface and it is mapped, restore focus
         // to it. Depending on the available size, the surface might already

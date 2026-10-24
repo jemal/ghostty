@@ -39,9 +39,35 @@ pub const Tab = struct {
     nodes: []const Node,
     active: u32 = 0,
     zoomed: ?u32 = null,
+    floating: []const Floating = &.{},
+    floating_selected: usize = 0,
+    floating_visible: bool = false,
+    floating_geometry: FloatGeometry = .{},
 
     pub fn validate(self: Tab) !void {
-        if (self.nodes.len == 0 or self.nodes.len > max_nodes) return error.InvalidTree;
+        if (self.floating.len > max_tabs) return error.InvalidTree;
+        if (self.floating.len > 0 and self.floating_selected >= self.floating.len) return error.InvalidTree;
+        if (self.floating.len == 0 and (self.floating_selected != 0 or self.floating_visible)) return error.InvalidTree;
+        try self.floating_geometry.validate();
+        for (self.floating, 0..) |floating, i| {
+            if (floating.pane != .leaf) return error.InvalidTree;
+            try validateLeaf(floating.pane.leaf);
+            if (floating.geometry) |geometry| try geometry.validate();
+            if (floating.stacking >= self.floating.len) return error.InvalidTree;
+            if (floating.name) |name| if (!validName(name)) return error.InvalidTree;
+            for (self.floating[0..i]) |previous| {
+                if (previous.pane.leaf.id == floating.pane.leaf.id) return error.InvalidTree;
+                if (floating.name) |name| if (previous.name) |other| {
+                    if (std.mem.eql(u8, name, other)) return error.InvalidTree;
+                };
+            }
+            for (self.nodes) |node| if (node == .leaf and node.leaf.id == floating.pane.leaf.id) return error.InvalidTree;
+        }
+        if (self.nodes.len == 0) {
+            if (self.floating.len == 0 or self.active != 0 or self.zoomed != null) return error.InvalidTree;
+            return;
+        }
+        if (self.nodes.len > max_nodes) return error.InvalidTree;
         if (self.active >= self.nodes.len or self.nodes[self.active] != .leaf)
             return error.InvalidTree;
         if (self.zoomed) |z| {
@@ -57,11 +83,7 @@ pub const Tab = struct {
         seen[index] = true;
         switch (self.nodes[index]) {
             .leaf => |leaf| {
-                if (leaf.id == 0) return error.InvalidTree;
-                if (leaf.working_directory) |cwd| {
-                    if (!std.fs.path.isAbsolute(cwd) or std.mem.indexOfScalar(u8, cwd, 0) != null)
-                        return error.InvalidTree;
-                }
+                try validateLeaf(leaf);
             },
             .split => |split| {
                 if (!std.math.isFinite(split.ratio) or split.ratio < 0 or split.ratio > 1)
@@ -72,6 +94,134 @@ pub const Tab = struct {
         }
     }
 };
+
+pub const Floating = struct {
+    pane: Node,
+    name: ?[:0]const u8 = null,
+    geometry: ?FloatGeometry = null,
+    stacking: usize = 0,
+};
+
+/// Fractions of the tab content area, independent of monitor scale and size.
+pub const FloatGeometry = struct {
+    x: f64 = 0.15,
+    y: f64 = 0.2,
+    width: f64 = 0.7,
+    height: f64 = 0.6,
+
+    pub fn anchored(anchor: anytype, width_percent: f64, height_percent: f64) FloatGeometry {
+        const width = width_percent / 100;
+        const height = height_percent / 100;
+        const ax: f64 = switch (anchor) {
+            .left, .@"top-left", .@"bottom-left" => 0,
+            .right, .@"top-right", .@"bottom-right" => 1,
+            else => 0.5,
+        };
+        const ay: f64 = switch (anchor) {
+            .top, .@"top-left", .@"top-right" => 0,
+            .bottom, .@"bottom-left", .@"bottom-right" => 1,
+            else => 0.5,
+        };
+        return .{ .x = (1 - width) * ax, .y = (1 - height) * ay, .width = width, .height = height };
+    }
+
+    pub const Pixels = struct { x: i32, y: i32, width: i32, height: i32 };
+
+    /// Preserve alignment within the remaining space after minimum-size
+    /// expansion. In particular, centered floats must stay centered.
+    pub fn pixels(self: FloatGeometry, parent_width: i32, parent_height: i32) Pixels {
+        const width = @max(1, parent_width);
+        const height = @max(1, parent_height);
+        const w = @min(width, @max(@min(320, width), @as(i32, @intFromFloat(self.width * @as(f64, @floatFromInt(width))))));
+        const h = @min(height, @max(@min(180, height), @as(i32, @intFromFloat(self.height * @as(f64, @floatFromInt(height))))));
+        const ax = if (self.width < 1) std.math.clamp(self.x / (1 - self.width), 0, 1) else 0.5;
+        const ay = if (self.height < 1) std.math.clamp(self.y / (1 - self.height), 0, 1) else 0.5;
+        return .{
+            .x = @intFromFloat(@round(@as(f64, @floatFromInt(width - w)) * ax)),
+            .y = @intFromFloat(@round(@as(f64, @floatFromInt(height - h)) * ay)),
+            .width = w,
+            .height = h,
+        };
+    }
+
+    /// Offset a new panel by 24 logical pixels, wrapping each axis when full.
+    pub fn cascade(self: FloatGeometry, parent_width: i32, parent_height: i32) FloatGeometry {
+        const width = @max(1, parent_width);
+        const height = @max(1, parent_height);
+        const rect = self.pixels(width, height);
+        const available_x = width - rect.width;
+        const available_y = height - rect.height;
+        const x = if (rect.x + 24 <= available_x) rect.x + 24 else 0;
+        const y = if (rect.y + 24 <= available_y) rect.y + 24 else 0;
+        var result = self;
+        result.x = if (available_x > 0) @as(f64, @floatFromInt(x)) / @as(f64, @floatFromInt(available_x)) * (1 - self.width) else 0;
+        result.y = if (available_y > 0) @as(f64, @floatFromInt(y)) / @as(f64, @floatFromInt(available_y)) * (1 - self.height) else 0;
+        return result;
+    }
+
+    /// Nearest center in the requested half-plane. If there is none, wrap to
+    /// the opposite extreme, preferring the same row/column. Stable cyclic tie
+    /// breaking makes even identically positioned panels reachable.
+    pub fn neighbor(geometries: []const FloatGeometry, selected: usize, direction: anytype, width: i32, height: i32) ?usize {
+        if (geometries.len <= 1 or selected >= geometries.len) return null;
+        const horizontal = direction == .left or direction == .right;
+        const forward = direction == .right or direction == .down;
+        const sign: f64 = if (forward) 1 else -1;
+        const source = geometries[selected].pixels(width, height);
+        const sx = @as(f64, @floatFromInt(source.x)) + @as(f64, @floatFromInt(source.width)) / 2;
+        const sy = @as(f64, @floatFromInt(source.y)) + @as(f64, @floatFromInt(source.height)) / 2;
+        var nearest: ?usize = null;
+        var nearest_distance = std.math.inf(f64);
+        var wrapped: ?usize = null;
+        var wrap_axis = std.math.inf(f64);
+        var wrap_cross = std.math.inf(f64);
+        for (1..geometries.len) |step| {
+            const index = (selected + if (forward) step else geometries.len - step) % geometries.len;
+            const rect = geometries[index].pixels(width, height);
+            const x = @as(f64, @floatFromInt(rect.x)) + @as(f64, @floatFromInt(rect.width)) / 2;
+            const y = @as(f64, @floatFromInt(rect.y)) + @as(f64, @floatFromInt(rect.height)) / 2;
+            const primary = sign * (if (horizontal) x - sx else y - sy);
+            const cross = if (horizontal) y - sy else x - sx;
+            const distance = primary * primary + cross * cross;
+            if (primary > 0 and distance < nearest_distance) {
+                nearest = index;
+                nearest_distance = distance;
+            }
+            const axis = sign * (if (horizontal) x else y);
+            if (axis < wrap_axis or (axis == wrap_axis and @abs(cross) < wrap_cross)) {
+                wrapped = index;
+                wrap_axis = axis;
+                wrap_cross = @abs(cross);
+            }
+        }
+        return nearest orelse wrapped;
+    }
+
+    pub fn validate(self: FloatGeometry) !void {
+        inline for (.{ self.x, self.y, self.width, self.height }) |v| {
+            if (!std.math.isFinite(v) or v < 0 or v > 1) return error.InvalidTree;
+        }
+        if (self.x >= 1 or self.y >= 1 or self.width <= 0 or self.height <= 0 or
+            self.x + self.width > 1.000001 or self.y + self.height > 1.000001) return error.InvalidTree;
+    }
+
+    pub fn adjust(self: *FloatGeometry, dx: f64, dy: f64, resize: bool) void {
+        if (resize) {
+            self.width = std.math.clamp(self.width + dx, @min(0.2, 1 - self.x), 1 - self.x);
+            self.height = std.math.clamp(self.height + dy, @min(0.2, 1 - self.y), 1 - self.y);
+        } else {
+            self.x = std.math.clamp(self.x + dx, 0, 1 - self.width);
+            self.y = std.math.clamp(self.y + dy, 0, 1 - self.height);
+        }
+    }
+};
+
+fn validateLeaf(leaf: @FieldType(Node, "leaf")) !void {
+    if (leaf.id == 0) return error.InvalidTree;
+    if (leaf.working_directory) |cwd| {
+        if (!std.fs.path.isAbsolute(cwd) or std.mem.indexOfScalar(u8, cwd, 0) != null) return error.InvalidTree;
+    }
+}
 
 pub const Node = union(enum) {
     leaf: struct {
@@ -433,4 +583,176 @@ test "session archive preserves contents and deletion stays within its ID" {
     try write(tmp.dir, testing.io, "1.json", bytes);
     try delete(tmp.dir, testing.io, 1);
     try testing.expectError(error.FileNotFound, tmp.dir.access(testing.io, "1.json", .{}));
+}
+
+test "session floating tabs round trip alongside tiles and without tiles" {
+    const alloc = std.testing.allocator;
+    const value: Session = .{
+        .id = 1,
+        .name = "Work",
+        .tabs = &.{
+            .{
+                .nodes = &.{.{ .leaf = .{ .id = 2 } }},
+                .floating = &.{
+                    .{ .name = "git", .pane = .{ .leaf = .{ .id = 3, .snapshot = 7, .working_directory = "/tmp", .title = "Git" } } },
+                    .{ .pane = .{ .leaf = .{ .id = 4, .relaunch = .{ .program = "hx", .argv = &.{"hx"}, .cwd = "/tmp" } } } },
+                },
+                .floating_selected = 1,
+                .floating_visible = true,
+                .floating_geometry = .{ .x = 0.1, .y = 0.1, .width = 0.8, .height = 0.8 },
+            },
+            .{ .nodes = &.{}, .floating = &.{.{ .pane = .{ .leaf = .{ .id = 5 } } }} },
+        },
+    };
+    try value.validate();
+    const bytes = try serialize(alloc, value);
+    defer alloc.free(bytes);
+    const restored = try parse(alloc, bytes);
+    defer restored.deinit();
+    try std.testing.expectEqualDeep(value, restored.value);
+
+    // Old manifests need no floating fields.
+    const old = try parse(alloc,
+        \\{"id":1,"name":"Old","tabs":[{"nodes":[{"leaf":{"id":2}}]}]}
+    );
+    defer old.deinit();
+    try std.testing.expectEqual(@as(usize, 0), old.value.tabs[0].floating.len);
+}
+
+test "session rejects invalid floating identities selection and geometry" {
+    const testing = std.testing;
+    var floats = [_]Floating{
+        .{ .name = "git", .pane = .{ .leaf = .{ .id = 3 } } },
+        .{ .name = "test", .pane = .{ .leaf = .{ .id = 4 } } },
+    };
+    var tab: Tab = .{ .nodes = &.{.{ .leaf = .{ .id = 2 } }}, .floating = &floats };
+    try tab.validate();
+    floats[1].name = "git";
+    try testing.expectError(error.InvalidTree, tab.validate());
+    floats[1].name = "test";
+    floats[1].pane.leaf.id = 3;
+    try testing.expectError(error.InvalidTree, tab.validate());
+    floats[1].pane.leaf.id = 2;
+    try testing.expectError(error.InvalidTree, tab.validate());
+    floats[1].pane.leaf.id = 4;
+    tab.floating_selected = 2;
+    try testing.expectError(error.InvalidTree, tab.validate());
+    tab.floating_selected = 0;
+    tab.floating_geometry.x = std.math.nan(f64);
+    try testing.expectError(error.InvalidTree, tab.validate());
+    tab.floating_geometry = .{ .x = 0.9 };
+    try testing.expectError(error.InvalidTree, tab.validate());
+    tab.floating_geometry = .{ .x = 1, .width = 0.0000001 };
+    try testing.expectError(error.InvalidTree, tab.validate());
+    tab.floating_geometry = .{};
+    floats[1].pane.leaf.working_directory = "relative";
+    try testing.expectError(error.InvalidTree, tab.validate());
+    const empty: Tab = .{ .nodes = &.{} };
+    try testing.expectError(error.InvalidTree, empty.validate());
+}
+
+test "session floating geometry clamps movement and resizing" {
+    var geometry: FloatGeometry = .{};
+    geometry.adjust(-10, 10, false);
+    try geometry.validate();
+    try std.testing.expectEqual(@as(f64, 0), geometry.x);
+    try std.testing.expectApproxEqAbs(@as(f64, 0.4), geometry.y, 0.000001);
+    geometry.adjust(10, 10, true);
+    try geometry.validate();
+    geometry.adjust(-10, -10, true);
+    try geometry.validate();
+    try std.testing.expectEqual(@as(f64, 0.2), geometry.width);
+    try std.testing.expectEqual(@as(f64, 0.2), geometry.height);
+    geometry = .{ .x = 0.95, .width = 0.05 };
+    geometry.adjust(-10, 0, true);
+    try geometry.validate();
+}
+
+test "floating terminal anchors stay aligned when minimum size grows" {
+    const testing = std.testing;
+    const center = FloatGeometry.anchored(.center, 70, 60);
+    try center.validate();
+    try testing.expectEqual(FloatGeometry.Pixels{ .x = 150, .y = 160, .width = 700, .height = 480 }, center.pixels(1000, 800));
+    try testing.expectEqual(FloatGeometry.Pixels{ .x = 40, .y = 10, .width = 320, .height = 180 }, center.pixels(400, 200));
+    try testing.expectEqual(FloatGeometry.Pixels{ .x = 0, .y = 0, .width = 200, .height = 100 }, center.pixels(200, 100));
+    const corner = FloatGeometry.anchored(.@"bottom-right", 50, 50);
+    try corner.validate();
+    try testing.expectEqual(FloatGeometry.Pixels{ .x = 80, .y = 20, .width = 320, .height = 180 }, corner.pixels(400, 200));
+    const full = FloatGeometry.anchored(.center, 100, 100);
+    try full.validate();
+    try testing.expectEqual(FloatGeometry.Pixels{ .x = 0, .y = 0, .width = 1000, .height = 800 }, full.pixels(1000, 800));
+    inline for (.{ .center, .top, .bottom, .left, .right, .@"top-left", .@"top-right", .@"bottom-left", .@"bottom-right" }) |anchor| {
+        const geometry = FloatGeometry.anchored(anchor, 80, 65);
+        try geometry.validate();
+        const rect = geometry.pixels(1000, 800);
+        try testing.expect(rect.x >= 0 and rect.y >= 0 and rect.x + rect.width <= 1000 and rect.y + rect.height <= 800);
+    }
+}
+
+test "floating panels cascade in pixels and wrap within content bounds" {
+    const testing = std.testing;
+    const initial = FloatGeometry.anchored(.center, 70, 60);
+    const second = initial.cascade(1000, 800);
+    try second.validate();
+    try testing.expectEqual(FloatGeometry.Pixels{ .x = 174, .y = 184, .width = 700, .height = 480 }, second.pixels(1000, 800));
+    const third = second.cascade(1000, 800);
+    try testing.expectEqual(FloatGeometry.Pixels{ .x = 198, .y = 208, .width = 700, .height = 480 }, third.pixels(1000, 800));
+    const edge = FloatGeometry.anchored(.@"bottom-right", 70, 60).cascade(1000, 800);
+    try edge.validate();
+    try testing.expectEqual(@as(i32, 0), edge.pixels(1000, 800).x);
+    try testing.expectEqual(@as(i32, 0), edge.pixels(1000, 800).y);
+    const tiny = initial.cascade(200, 100);
+    try tiny.validate();
+    try testing.expectEqual(FloatGeometry.Pixels{ .x = 0, .y = 0, .width = 200, .height = 100 }, tiny.pixels(200, 100));
+}
+
+test "floating directional focus finds nearest panels and wraps on each axis" {
+    const testing = std.testing;
+    const grid = [_]FloatGeometry{
+        .{ .x = 0, .y = 0, .width = 0.3, .height = 0.3 },
+        .{ .x = 0.65, .y = 0, .width = 0.3, .height = 0.3 },
+        .{ .x = 0, .y = 0.65, .width = 0.3, .height = 0.3 },
+        .{ .x = 0.65, .y = 0.65, .width = 0.3, .height = 0.3 },
+    };
+    try testing.expectEqual(@as(?usize, 1), FloatGeometry.neighbor(&grid, 0, .right, 2000, 1200));
+    try testing.expectEqual(@as(?usize, 2), FloatGeometry.neighbor(&grid, 0, .down, 2000, 1200));
+    try testing.expectEqual(@as(?usize, 0), FloatGeometry.neighbor(&grid, 1, .left, 2000, 1200));
+    try testing.expectEqual(@as(?usize, 0), FloatGeometry.neighbor(&grid, 2, .up, 2000, 1200));
+    try testing.expectEqual(@as(?usize, 1), FloatGeometry.neighbor(&grid, 0, .left, 2000, 1200));
+    try testing.expectEqual(@as(?usize, 0), FloatGeometry.neighbor(&grid, 1, .right, 2000, 1200));
+    try testing.expectEqual(@as(?usize, 2), FloatGeometry.neighbor(&grid, 0, .up, 2000, 1200));
+    try testing.expectEqual(@as(?usize, 0), FloatGeometry.neighbor(&grid, 2, .down, 2000, 1200));
+    const identical = [_]FloatGeometry{ .{}, .{}, .{} };
+    try testing.expectEqual(@as(?usize, 1), FloatGeometry.neighbor(&identical, 0, .right, 800, 600));
+    try testing.expectEqual(@as(?usize, 2), FloatGeometry.neighbor(&identical, 1, .right, 800, 600));
+    try testing.expectEqual(@as(?usize, 0), FloatGeometry.neighbor(&identical, 2, .right, 800, 600));
+    try testing.expectEqual(@as(?usize, 2), FloatGeometry.neighbor(&identical, 0, .left, 800, 600));
+    try testing.expectEqual(@as(?usize, null), FloatGeometry.neighbor(identical[0..1], 0, .left, 800, 600));
+    try testing.expectEqual(@as(?usize, null), FloatGeometry.neighbor(&.{}, 0, .left, 800, 600));
+}
+
+test "floating panel sessions preserve individual geometry and stacking" {
+    const alloc = std.testing.allocator;
+    const value: Session = .{ .id = 10, .name = "Panels", .tabs = &.{.{
+        .nodes = &.{},
+        .floating_visible = true,
+        .floating_selected = 1,
+        .floating = &.{
+            .{ .name = "git", .pane = .{ .leaf = .{ .id = 20, .snapshot = 7 } }, .geometry = FloatGeometry.anchored(.center, 70, 60), .stacking = 1 },
+            .{ .pane = .{ .leaf = .{ .id = 21 } }, .geometry = .{ .x = 0.1, .y = 0.1, .width = 0.5, .height = 0.5 }, .stacking = 0 },
+        },
+    }} };
+    const bytes = try serialize(alloc, value);
+    defer alloc.free(bytes);
+    const restored = try parse(alloc, bytes);
+    defer restored.deinit();
+    try std.testing.expectEqualDeep(value, restored.value);
+    var invalid = value.tabs[0].floating[0];
+    invalid.geometry.?.x = std.math.nan(f64);
+    const bad: Tab = .{ .nodes = &.{}, .floating = &.{invalid} };
+    try std.testing.expectError(error.InvalidTree, bad.validate());
+    invalid.geometry = .{};
+    invalid.stacking = 3;
+    const bad_stack: Tab = .{ .nodes = &.{}, .floating = &.{invalid} };
+    try std.testing.expectError(error.InvalidTree, bad_stack.validate());
 }
