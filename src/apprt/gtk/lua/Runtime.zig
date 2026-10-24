@@ -243,6 +243,7 @@ host: Host,
 actions: std.StringArrayHashMapUnmanaged(Action) = .empty,
 binds: std.ArrayList(Bind) = .empty,
 relaunch_programs: std.ArrayList([]const u8) = .empty,
+relaunch_commands: std.StringHashMapUnmanaged([]const []const u8) = .empty,
 
 /// True while `init.lua` runs. Some functions work only at load time.
 loading: bool = false,
@@ -304,6 +305,7 @@ pub fn destroy(self: *Runtime) void {
     self.actions.deinit(self.alloc);
     self.binds.deinit(self.alloc);
     self.relaunch_programs.deinit(self.alloc);
+    self.relaunch_commands.deinit(self.alloc);
     self.arena.deinit();
     self.scratch.deinit();
     self.alloc.destroy(self);
@@ -685,11 +687,26 @@ pub fn relaunchAllowed(self: *const Runtime, program: []const u8) bool {
     return false;
 }
 
+pub fn relaunchArguments(self: *const Runtime, program: []const u8) ?[]const []const u8 {
+    return self.relaunch_commands.get(program);
+}
+
+fn relaunchListContains(L: ?*c.lua_State, name: []const u8) bool {
+    for (0..c.lua_rawlen(L, 2)) |i| {
+        _ = c.lua_rawgeti(L, 2, @intCast(i + 1));
+        const matches = std.mem.eql(u8, name, toString(L, -1));
+        c.lua_settop(L, -2);
+        if (matches) return true;
+    }
+    return false;
+}
+
 /// ghostty.session.relaunch{ programs = { "hx", "lazygit" } }
 fn luaSessionRelaunch(L: ?*c.lua_State) callconv(.c) c_int {
     const self = fromState(L);
     if (!self.loading) return c.luaL_error(L, "ghostty.session.relaunch works only while init.lua loads");
     c.luaL_checktype(L, 1, c.LUA_TTABLE);
+    c.lua_settop(L, 1);
     if (c.lua_getfield(L, 1, "programs") != c.LUA_TTABLE)
         return c.luaL_error(L, "ghostty.session.relaunch: programs must be a list");
     const len = c.lua_rawlen(L, 2);
@@ -701,6 +718,36 @@ fn luaSessionRelaunch(L: ?*c.lua_State) callconv(.c) c_int {
             return c.luaL_error(L, "ghostty.session.relaunch: expected executable names, without paths");
         c.lua_settop(L, -2);
     }
+    const commands_kind = c.lua_getfield(L, 1, "commands");
+    if (commands_kind != c.LUA_TNIL and commands_kind != c.LUA_TTABLE)
+        return c.luaL_error(L, "ghostty.session.relaunch: commands must be a table");
+    if (commands_kind == c.LUA_TTABLE) {
+        c.lua_pushnil(L);
+        while (c.lua_next(L, 3) != 0) {
+            if (c.lua_type(L, -2) != c.LUA_TSTRING or c.lua_type(L, -1) != c.LUA_TTABLE)
+                return c.luaL_error(L, "ghostty.session.relaunch: commands must map program names to argument lists");
+            const name = toString(L, -2);
+            if (!self.relaunchAllowed(name) and !relaunchListContains(L, name))
+                return c.luaL_error(L, "ghostty.session.relaunch: command program must also be registered");
+            const argv_index = c.lua_absindex(L, -1);
+            const count = c.lua_rawlen(L, argv_index);
+            if (count == 0 or count > session_relaunch.max_args)
+                return c.luaL_error(L, "ghostty.session.relaunch: command must have 1 to 256 arguments");
+            var bytes: usize = 0;
+            for (0..count) |i| {
+                if (c.lua_rawgeti(L, argv_index, @intCast(i + 1)) != c.LUA_TSTRING)
+                    return c.luaL_error(L, "ghostty.session.relaunch: command arguments must be strings");
+                const arg = toString(L, -1);
+                if (!session_relaunch.validText(arg) or (i == 0 and !std.mem.eql(u8, arg, name)))
+                    return c.luaL_error(L, "ghostty.session.relaunch: command must start with its program name and contain no control characters");
+                if (arg.len > session_relaunch.max_bytes - bytes)
+                    return c.luaL_error(L, "ghostty.session.relaunch: command exceeds 32 KiB");
+                bytes += arg.len;
+                c.lua_settop(L, -2);
+            }
+            c.lua_settop(L, -2);
+        }
+    }
     // Validate the whole registration before allocating or changing policy.
     for (0..len) |i| {
         _ = c.lua_rawgeti(L, 2, @intCast(i + 1));
@@ -710,6 +757,21 @@ fn luaSessionRelaunch(L: ?*c.lua_State) callconv(.c) c_int {
             self.relaunch_programs.append(self.alloc, copy) catch return c.luaL_error(L, "out of memory");
         }
         c.lua_settop(L, -2);
+    }
+    if (commands_kind == c.LUA_TTABLE) {
+        c.lua_pushnil(L);
+        while (c.lua_next(L, 3) != 0) {
+            const name = self.arena.allocator().dupe(u8, toString(L, -2)) catch return c.luaL_error(L, "out of memory");
+            const argv_index = c.lua_absindex(L, -1);
+            const argv = self.arena.allocator().alloc([]const u8, c.lua_rawlen(L, argv_index)) catch return c.luaL_error(L, "out of memory");
+            for (argv, 1..) |*arg, i| {
+                _ = c.lua_rawgeti(L, argv_index, @intCast(i));
+                arg.* = self.arena.allocator().dupe(u8, toString(L, -1)) catch return c.luaL_error(L, "out of memory");
+                c.lua_settop(L, -2);
+            }
+            self.relaunch_commands.put(self.alloc, name, argv) catch return c.luaL_error(L, "out of memory");
+            c.lua_settop(L, -2);
+        }
     }
     return 0;
 }
@@ -1452,6 +1514,46 @@ test "session relaunch registration validates programs and is load-time only" {
     const replacement = try create(t.allocator, host.host());
     defer replacement.destroy();
     try t.expect(!replacement.relaunchAllowed("hx"));
+}
+
+test "session relaunch commands resume latest without retaining original prompts" {
+    const t = std.testing;
+    var host: TestHost = .{};
+    const rt = try create(t.allocator, host.host());
+    defer rt.destroy();
+    try testLoad(rt,
+        \\ghostty.session.relaunch{
+        \\  programs = { "hx", "claude", "codex" },
+        \\  commands = {
+        \\    claude = { "claude", "--continue" },
+        \\    codex = { "codex", "resume", "--last" },
+        \\  },
+        \\}
+        \\assert(not pcall(ghostty.session.relaunch, { programs = { "btop" }, commands = { btop = { "hx" } } }))
+        \\assert(not pcall(ghostty.session.relaunch, { programs = {}, commands = { unknown = { "unknown" } } }))
+        \\assert(not pcall(ghostty.session.relaunch, { programs = {}, commands = { claude = {} } }))
+        \\assert(not pcall(ghostty.session.relaunch, { programs = {}, commands = { claude = { "claude", "bad\narg" } } }))
+        \\assert(not pcall(ghostty.session.relaunch, { programs = {}, commands = { claude = { "claude", 4 } } }))
+        \\ghostty.session.relaunch({ programs = { "jjui" } }, "ignored extra argument")
+    );
+    try t.expect(!rt.relaunchAllowed("btop"));
+    try t.expect(rt.relaunchAllowed("jjui"));
+    try t.expect(rt.relaunchArguments("hx") == null);
+    const captured: session_relaunch.Record = .{ .program = "codex", .argv = &.{ "codex", "original prompt" }, .cwd = "/tmp" };
+    var launch = captured;
+    launch.argv = rt.relaunchArguments(captured.program) orelse captured.argv;
+    const cmd = try session_relaunch.command(t.allocator, .nushell, launch);
+    defer t.allocator.free(cmd);
+    try t.expectEqualStrings("^\"codex\" \"resume\" \"--last\"\r", cmd);
+    try t.expectEqualStrings("original prompt", captured.argv[1]);
+    try t.expectEqualStrings("--continue", rt.relaunchArguments("claude").?[1]);
+    try testLoad(rt,
+        \\ghostty.session.relaunch{ programs = {}, commands = { codex = { "codex", "resume", "selected-id" } } }
+    );
+    try t.expectEqualStrings("selected-id", rt.relaunchArguments("codex").?[2]);
+    const fresh = try create(t.allocator, host.host());
+    defer fresh.destroy();
+    try t.expect(fresh.relaunchArguments("codex") == null);
 }
 
 test "run returns false when a bound function returns false" {

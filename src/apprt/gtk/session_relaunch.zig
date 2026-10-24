@@ -54,7 +54,7 @@ pub fn validProgram(name: []const u8) bool {
     return true;
 }
 
-fn validText(text: []const u8) bool {
+pub fn validText(text: []const u8) bool {
     if (!std.unicode.utf8ValidateSlice(text)) return false;
     for (text) |ch| if (std.ascii.isControl(ch)) return false;
     return true;

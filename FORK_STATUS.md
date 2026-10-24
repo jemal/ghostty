@@ -6,6 +6,17 @@ This document records the work completed across the development chats, the curre
 
 ## Current checkpoint
 
+- Installed and desktop-approved on 2026-10-23: per-program Lua restore commands. `commands` in
+  `ghostty.session.relaunch` maps registered names to replacement argv; other
+  programs replay captured arguments. Claude uses `claude --continue`, Codex
+  uses `codex resume --last`, both in the captured directory. These select the
+  latest conversation there, not an exact per-pane ID. GTK build with system
+  Fontconfig, focused relaunch tests, formatting and diff checks passed. The
+  user's init.lua and LuaLS types were updated. The user confirmed desktop
+  behavior on 2026-10-23. Installed to `~/.local` with ReleaseFast and system
+  Fontconfig. Review found no blocking issues; final focused checks passed
+  (86 tests passed, one Fish test skipped) and Zig formatting passed.
+  Recorded in jj change `kypvvzst`.
 - Desktop-approved on 2026-10-23: Lua-managed program relaunch on session restore. Register names
   with `ghostty.session.relaunch{ programs = { "hx", "jjui", "btop" } }`;
   the default is empty. Linux capture records eligible foreground argv/cwd. A
@@ -119,6 +130,11 @@ remains subject to continued use.
 
 ## Desktop integration and continuation notes
 
+- Preserve Nix/Home Manager symlinks when editing configuration. Resolve the
+  target first and edit `~/.config/hamlet/modules/ghostty/init.lua` directly;
+  `~/.config/ghostty/init.lua` points there through Home Manager's store links.
+  Do not use `sed -i` on the symlink path: it replaces the link. The types
+  directory is also linked to `~/.config/hamlet/modules/ghostty/types`.
 - Home Manager source: `~/.config/hamlet/modules/ghostty.mod.nix`.
   On Linux, `programs.ghostty.package = null` and `systemd.enable = false`.
   A declarative drop-in at
@@ -589,6 +605,7 @@ upstream; `main` tracks `main@origin`. Never push `folie` to `origin`.
 | `zxrltonz` | gtk: refine tab sizing and automatic toolbar visibility |
 | `kqzsmzko` | gtk: restore saved sessions in unsaved windows |
 | `rypyunky` | gtk: relaunch registered programs when restoring sessions |
+| `kypvvzst` | gtk: configure session relaunch commands in Lua |
 
 ## Related implementation documentation
 

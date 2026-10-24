@@ -15,6 +15,13 @@ and cwd; a fresh shell relaunches after OSC 133 readiness, with literal quoting.
 See `SESSION_RESTORE.md` for cancellation and supported shells. This does not
 add phase 4 events, devshell reconstruction or editor-internal state restoration.
 
+An optional `commands` table maps registered executable
+names to replacement argv for restoration, for example
+`commands = { claude = { "claude", "--continue" }, codex = { "codex", "resume", "--last" } }`.
+Overrides use the current runtime at launch time and do not alter saved argv.
+Each command must start with its registered name. This supports latest-per-cwd
+conversation resume, not per-pane conversation identity.
+
 - Each action, bound function and timer function runs in its own Lua
   coroutine (a "task"). A task can wait for the host. While it waits, GTK
   keeps running, and other actions can run.

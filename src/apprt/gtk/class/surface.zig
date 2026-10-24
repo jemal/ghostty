@@ -2275,7 +2275,9 @@ pub const Surface = extern struct {
             self.showRelaunchToast(i18n._("Program relaunch skipped: shell changed directory during startup."));
             return 0;
         }
-        const command = session_relaunch.command(app.allocator(), shell, record) catch return 0;
+        var launch = record;
+        launch.argv = app.sessionRelaunchArguments(record.program) orelse record.argv;
+        const command = session_relaunch.command(app.allocator(), shell, launch) catch return 0;
         defer app.allocator().free(command);
         surface.writeShellCommand(command) catch |err| {
             log.warn("unable to relaunch saved program err={}", .{err});

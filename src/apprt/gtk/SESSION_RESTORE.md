@@ -28,7 +28,11 @@ saved session is opened:
 
 ```lua
 ghostty.session.relaunch {
-  programs = { "hx", "jjui", "btop" },
+  programs = { "hx", "jjui", "btop", "claude", "codex" },
+  commands = {
+    claude = { "claude", "--continue" },
+    codex = { "codex", "resume", "--last" },
+  },
 }
 ```
 
@@ -36,6 +40,20 @@ There is no default registration. This function works only while `init.lua`
 loads; registrations are additive, with at most 64 names. Names are executable
 basenames rather than aliases or paths. The current Lua registration governs
 both capture and relaunch, including sessions saved with older registrations.
+
+The optional `commands` table replaces a program's captured argument array at
+launch time. Each key must be registered and each value must be an argument
+list starting with that same executable name (no shell command strings). This
+replaces all captured arguments, including initial prompts, profile options and
+explicit resume IDs. Without an entry, the captured arguments are replayed.
+Later registrations can replace an entry; removing it from `init.lua` and
+reloading restores normal replay. Saved records keep the original arguments.
+
+The example resumes Claude Code's and Codex CLI's latest conversation in the
+captured directory. It does not identify the conversation that originally ran
+in a particular pane: multiple panes in the same directory can resume the same
+latest conversation. Resume errors are handled by the CLI and leave the shell
+available. No prompt is automatically resubmitted by these restore commands.
 
 Saving captures the registered foreground program's argument array and working
 directory. Relaunch starts a fresh shell in that directory, waits for its live
