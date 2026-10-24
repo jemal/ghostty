@@ -204,12 +204,16 @@ pub const Tab = extern struct {
 
         tab.as(gobject.Object).notifyByPspec(properties.config.impl.param_spec);
 
+        // A title for a new tab names the tab, not only its first pane.
+        // Otherwise the tab title changes when another pane gets the focus.
+        if (overrides.title) |title| tab.setTitleOverride(title);
+
         // Create our initial surface in the split tree.
         priv.split_tree.newSplit(.right, null, .{
             .command = overrides.command,
             .shell_integration = overrides.shell_integration,
             .working_directory = overrides.working_directory,
-            .title = overrides.title,
+            .title = null,
             .wait_after_command = overrides.wait_after_command,
         }) catch |err| switch (err) {
             error.OutOfMemory => {
