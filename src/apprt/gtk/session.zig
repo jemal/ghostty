@@ -1,9 +1,10 @@
 //! Named GTK sessions. Names are display metadata; immutable IDs identify
 //! sessions and panes so renaming never changes their on-disk identity.
 //! Terminal snapshots can be associated with pane IDs independently of this
-//! layout manifest. This module deliberately does not persist commands.
+//! layout manifest. Only explicitly registered programs carry relaunch records.
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+pub const Relaunch = @import("session_relaunch.zig").Record;
 
 pub const version = 1;
 pub const max_sessions = 256;
@@ -78,6 +79,7 @@ pub const Node = union(enum) {
         snapshot: ?u64 = null,
         working_directory: ?[:0]const u8 = null,
         title: ?[:0]const u8 = null,
+        relaunch: ?Relaunch = null,
     },
     split: struct {
         layout: enum { horizontal, vertical },
@@ -307,7 +309,11 @@ test "session manifest round trip and validation" {
             .title = "Code",
             .nodes = &.{
                 .{ .split = .{ .layout = .horizontal, .ratio = 0.3, .left = 1, .right = 2 } },
-                .{ .leaf = .{ .id = 1, .working_directory = "/tmp" } },
+                .{ .leaf = .{ .id = 1, .working_directory = "/tmp", .relaunch = .{
+                    .program = "hx",
+                    .argv = &.{ "hx", "a b.rs", "" },
+                    .cwd = "/tmp",
+                } } },
                 .{ .leaf = .{ .id = 2 } },
             },
             .active = 2,

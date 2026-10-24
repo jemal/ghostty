@@ -1201,6 +1201,10 @@ pub fn handleMessage(self: *Surface, msg: Message) !void {
             self.command_timer = .now(global.io(), .awake);
         },
 
+        .shell_ready => {
+            if (comptime @hasDecl(apprt.Surface, "shellReady")) self.rt_surface.shellReady();
+        },
+
         .stop_command => |v| timer: {
             const end: std.Io.Timestamp = .now(global.io(), .awake);
             const start = self.command_timer orelse break :timer;
@@ -3461,6 +3465,12 @@ pub fn textCallback(self: *Surface, text: []const u8) !void {
     defer crash.sentry.thread_state = null;
 
     try self.completeClipboardPaste(text, true);
+}
+
+/// Write an internally encoded, literal relaunch command after a fresh shell
+/// reports readiness. Unlike clipboard paste, its final Enter must execute.
+pub fn writeShellCommand(self: *Surface, command: []const u8) !void {
+    self.queueIo(try termio.Message.writeReq(self.alloc, command), .unlocked);
 }
 
 /// Callback for when the surface is fully visible or not, regardless
@@ -6328,6 +6338,7 @@ fn completeClipboardPaste(
     data: []const u8,
     allow_unsafe: bool,
 ) !void {
+    if (comptime @hasDecl(apprt.Surface, "cancelSessionRelaunch")) self.rt_surface.cancelSessionRelaunch();
     if (data.len == 0) return;
 
     const encode_opts: input.paste.Options = encode_opts: {

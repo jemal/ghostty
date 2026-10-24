@@ -874,6 +874,11 @@ pub const Application = extern struct {
         return runtime.run(name, surface_id);
     }
 
+    pub fn sessionRelaunchAllowed(self: *Self, program: []const u8) bool {
+        const runtime = self.private().lua orelse return false;
+        return runtime.relaunchAllowed(program);
+    }
+
     /// Open a new window. Lua's `ghostty.window` uses this.
     pub fn newWindow(self: *Self, parent: ?*CoreSurface, overrides: Overrides) !void {
         try Action.newWindow(self, parent, overrides);

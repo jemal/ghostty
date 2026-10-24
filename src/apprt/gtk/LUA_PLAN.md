@@ -7,6 +7,14 @@ is not started.
 
 ## Phase 3: what exists now
 
+Program relaunch is implemented and desktop-approved (2026-10-23): load-time
+`ghostty.session.relaunch{ programs = { "hx", "jjui", "btop" } }` registers
+executable basenames (additive, maximum 64). The current runtime controls capture
+and relaunch; nothing is allowed by default. Linux sessions store eligible argv
+and cwd; a fresh shell relaunches after OSC 133 readiness, with literal quoting.
+See `SESSION_RESTORE.md` for cancellation and supported shells. This does not
+add phase 4 events, devshell reconstruction or editor-internal state restoration.
+
 - Each action, bound function and timer function runs in its own Lua
   coroutine (a "task"). A task can wait for the host. While it waits, GTK
   keeps running, and other actions can run.

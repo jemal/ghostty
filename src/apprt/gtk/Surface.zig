@@ -32,6 +32,14 @@ pub fn sessionSnapshot(self: *Self) ?[]const u8 {
     return self.surface.sessionSnapshot();
 }
 
+pub fn shellReady(self: *Self) void {
+    self.surface.shellReady();
+}
+
+pub fn cancelSessionRelaunch(self: *Self) void {
+    self.surface.cancelSessionRelaunch();
+}
+
 pub fn switchSession(self: *Self) bool {
     const window = @import("ext.zig").getAncestor(
         @import("class/window.zig").Window,

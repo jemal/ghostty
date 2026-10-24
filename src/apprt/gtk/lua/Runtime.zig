@@ -17,6 +17,7 @@ const c = @import("lua").c;
 const configpkg = @import("../../../config.zig");
 const global = @import("../../../global.zig");
 const input = @import("../../../input.zig");
+const session_relaunch = @import("../session_relaunch.zig");
 
 const log = std.log.scoped(.gtk_lua);
 
@@ -241,6 +242,7 @@ lua: *c.lua_State,
 host: Host,
 actions: std.StringArrayHashMapUnmanaged(Action) = .empty,
 binds: std.ArrayList(Bind) = .empty,
+relaunch_programs: std.ArrayList([]const u8) = .empty,
 
 /// True while `init.lua` runs. Some functions work only at load time.
 loading: bool = false,
@@ -301,6 +303,7 @@ pub fn destroy(self: *Runtime) void {
     c.lua_close(self.lua);
     self.actions.deinit(self.alloc);
     self.binds.deinit(self.alloc);
+    self.relaunch_programs.deinit(self.alloc);
     self.arena.deinit();
     self.scratch.deinit();
     self.alloc.destroy(self);
@@ -618,6 +621,11 @@ fn installApi(self: *Runtime) void {
     c.lua_setfield(L, -2, "info");
     c.lua_setfield(L, -2, "surface");
 
+    c.lua_createtable(L, 0, 1);
+    c.lua_pushcclosure(L, luaSessionRelaunch, 0);
+    c.lua_setfield(L, -2, "relaunch");
+    c.lua_setfield(L, -2, "session");
+
     c.lua_setglobal(L, "ghostty");
 
     // These functions block the GTK main thread or stop the app.
@@ -669,6 +677,40 @@ fn luaAction(L: ?*c.lua_State) callconv(.c) c_int {
 
     // No Lua errors can happen after this point, except out of memory.
     self.addAction(name, title, description) catch return c.luaL_error(L, "out of memory");
+    return 0;
+}
+
+pub fn relaunchAllowed(self: *const Runtime, program: []const u8) bool {
+    for (self.relaunch_programs.items) |name| if (std.mem.eql(u8, name, program)) return true;
+    return false;
+}
+
+/// ghostty.session.relaunch{ programs = { "hx", "lazygit" } }
+fn luaSessionRelaunch(L: ?*c.lua_State) callconv(.c) c_int {
+    const self = fromState(L);
+    if (!self.loading) return c.luaL_error(L, "ghostty.session.relaunch works only while init.lua loads");
+    c.luaL_checktype(L, 1, c.LUA_TTABLE);
+    if (c.lua_getfield(L, 1, "programs") != c.LUA_TTABLE)
+        return c.luaL_error(L, "ghostty.session.relaunch: programs must be a list");
+    const len = c.lua_rawlen(L, 2);
+    if (len + self.relaunch_programs.items.len > 64)
+        return c.luaL_error(L, "ghostty.session.relaunch: at most 64 programs");
+    for (0..len) |i| {
+        if (c.lua_rawgeti(L, 2, @intCast(i + 1)) != c.LUA_TSTRING or
+            !session_relaunch.validProgram(toString(L, -1)))
+            return c.luaL_error(L, "ghostty.session.relaunch: expected executable names, without paths");
+        c.lua_settop(L, -2);
+    }
+    // Validate the whole registration before allocating or changing policy.
+    for (0..len) |i| {
+        _ = c.lua_rawgeti(L, 2, @intCast(i + 1));
+        const name = toString(L, -1);
+        if (!self.relaunchAllowed(name)) {
+            const copy = self.arena.allocator().dupe(u8, name) catch return c.luaL_error(L, "out of memory");
+            self.relaunch_programs.append(self.alloc, copy) catch return c.luaL_error(L, "out of memory");
+        }
+        c.lua_settop(L, -2);
+    }
     return 0;
 }
 
@@ -1387,6 +1429,29 @@ test "actions and binds become config entries" {
         "Run \"Cargo\"",
         config.@"command-palette-entry".value.items[config.@"command-palette-entry".value.items.len - 1].title,
     );
+}
+
+test "session relaunch registration validates programs and is load-time only" {
+    const t = std.testing;
+    var host: TestHost = .{};
+    const rt = try create(t.allocator, host.host());
+    defer rt.destroy();
+    try testLoad(rt,
+        \\ghostty.session.relaunch{ programs = { "hx", "lazygit", "hx" } }
+        \\assert(not pcall(ghostty.session.relaunch, { programs = { "btop", "bad/name" } }))
+        \\assert(not pcall(ghostty.session.relaunch, { programs = { "hx\0oops" } }))
+        \\ghostty.action{ name = "late", run = function()
+        \\  assert(not pcall(ghostty.session.relaunch, { programs = { "btop" } }))
+        \\end }
+    );
+    try t.expect(rt.relaunchAllowed("hx"));
+    try t.expect(rt.relaunchAllowed("lazygit"));
+    try t.expect(!rt.relaunchAllowed("btop"));
+    try t.expect(rt.run("late", 1));
+    try t.expect(!rt.relaunchAllowed("btop"));
+    const replacement = try create(t.allocator, host.host());
+    defer replacement.destroy();
+    try t.expect(!replacement.relaunchAllowed("hx"));
 }
 
 test "run returns false when a bound function returns false" {

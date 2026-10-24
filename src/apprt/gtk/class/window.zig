@@ -1114,6 +1114,7 @@ pub const Window = extern struct {
                 .leaf => |surface| .{ .leaf = .{
                     .id = surface.sessionId(),
                     .snapshot = surface.sessionSnapshotId(),
+                    .relaunch = try surface.captureSessionRelaunch(alloc),
                     .working_directory = if (surface.getSessionWorkingDirectory()) |pwd|
                         if (std.fs.path.isAbsolute(pwd)) try alloc.dupeSentinel(u8, pwd, 0) else null
                     else
@@ -1326,7 +1327,17 @@ pub const Window = extern struct {
         const alloc = Application.default().allocator();
         switch (nodes[index]) {
             .leaf => |leaf| {
+                var relaunch = leaf.relaunch;
+                if (relaunch) |record| {
+                    if (!record.valid() or !Application.default().sessionRelaunchAllowed(record.program)) relaunch = null;
+                }
                 const cwd = cwd: {
+                    if (relaunch) |record| {
+                        if (std.Io.Dir.cwd().openDir(global.io(), record.cwd, .{})) |dir| {
+                            dir.close(global.io());
+                            break :cwd record.cwd;
+                        } else |_| relaunch = null;
+                    }
                     const path = leaf.working_directory orelse break :cwd null;
                     const dir = std.Io.Dir.cwd().openDir(global.io(), path, .{}) catch {
                         log.warn("session directory no longer available: {s}", .{path});
@@ -1345,6 +1356,7 @@ pub const Window = extern struct {
                 defer surface.unref();
                 surface.restoreSessionId(leaf.id);
                 surface.restoreSessionSnapshot(session_id, leaf.snapshot);
+                if (relaunch) |record| try surface.restoreSessionRelaunch(record);
                 surface.bindIsSplit(widget);
                 return Surface.Tree.init(alloc, surface);
             },

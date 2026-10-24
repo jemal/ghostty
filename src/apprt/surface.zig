@@ -143,6 +143,9 @@ pub const Message = union(enum) {
     /// A command has started in the shell, start a timer.
     start_command,
 
+    /// A live shell emitted OSC 133 B/I (prompt finished, ready for input).
+    shell_ready,
+
     /// A command has finished in the shell, stop the timer and send out
     /// notifications as appropriate. The optional u8 is the exit code
     /// of the command.

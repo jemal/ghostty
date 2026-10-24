@@ -6,6 +6,20 @@ This document records the work completed across the development chats, the curre
 
 ## Current checkpoint
 
+- Desktop-approved on 2026-10-23: Lua-managed program relaunch on session restore. Register names
+  with `ghostty.session.relaunch{ programs = { "hx", "jjui", "btop" } }`;
+  the default is empty. Linux capture records eligible foreground argv/cwd. A
+  fresh shell relaunches after OSC 133 readiness, with literal quoting and
+  cancellation on typing/paste or timeout. Devshell and editor-internal state
+  are outside scope. The GTK build with system Fontconfig, formatting and focused
+  tests passed. Fish's runtime test is skipped because Fish is not installed.
+  The user's init.lua registers hx, jjui and btop with an older-binary guard;
+  LuaLS types were updated. The user confirmed program relaunch works on the
+  desktop on 2026-10-23. Capture streams procfs cmdline files, which report zero
+  size; a regression test and a check against live Helix cover this behavior.
+  Review found no blocking issues. The final focused tests and formatting passed;
+  installed to `~/.local` with ReleaseFast and system Fontconfig after review.
+  Recorded in jj change `rypyunky`.
 - Desktop-approved on 2026-10-23: opening a closed saved session from an unsaved normal window
   restores in place, preserving the host window's geometry. Saved source windows
   and quick terminals still open separately; already-open sessions are focused.
@@ -356,6 +370,25 @@ the ReleaseFast build passed and it is installed. The user's desktop test
 passed on 2026-10-23. Phase 4 (events) is not started. See
 `src/apprt/gtk/LUA_PLAN.md`.
 
+### Program relaunch on restore
+
+On Linux, `ghostty.session.relaunch{ programs = { "hx", "jjui", "btop" } }`
+in `init.lua` registers executable names for saved-session relaunch. There is no
+default allowlist. Session panes store captured argv and the foreground process
+directory; both capture and launch consult the current Lua registration.
+
+Restoration starts a fresh shell, waits for live OSC 133 prompt readiness, and
+submits a literally quoted command. Exiting the program returns to the shell.
+Typing/pasting or a 15-second readiness timeout cancels pending launch. Inactive
+tabs retain their record until initialized. Unsupported processes, redirection,
+missing directories and disabled registrations restore ordinary shells.
+
+Program memory, editor buffers, pipelines and devshell environments are not
+reconstructed. The user will handle Helix's development environment through its
+plugin system. GTK builds and focused tests passed, including real Bash/Nushell
+argument round trips and zero-size procfs reads. Fish runtime testing is skipped
+because it is unavailable. The user confirmed desktop behavior on 2026-10-23.
+
 ### Native picker and IPC
 
 Applications and scripts can invoke `ghostty +pick`, supplying one JSON document on stdin and receiving one structured JSON response on stdout.
@@ -504,9 +537,9 @@ Findings from the code are in the conversation of 2026-10-23. Short form:
   script build the picker.
 - **Vim-style cursor mode in scrollback:** not in upstream. Upstream has
   search and `adjust_selection` only. Large feature.
-- **Restore Helix panes:** sessions save the directory, not the program.
-  Could save the foreground command line (`/proc/<pid>/cmdline`) for known
-  programs and type it into the new shell at restore.
+- **Restore Helix panes:** implemented and desktop-approved on 2026-10-23 as
+  Lua-managed program relaunch. Captures argv/cwd for registered executables
+  and relaunches through a fresh shell; editor-internal state is outside scope.
 - **Font size reset:** fixed (2026-10-23, desktop test passed). A surface
   that inherits a zoomed size now keeps `font-size` from the config as its
   original size, so reset goes back to the configured size. The inherited
@@ -555,6 +588,7 @@ upstream; `main` tracks `main@origin`. Never push `folie` to `origin`.
 | `mnzxlrvt` | docs: record the 2026-10-23 fork work in FORK_STATUS.md |
 | `zxrltonz` | gtk: refine tab sizing and automatic toolbar visibility |
 | `kqzsmzko` | gtk: restore saved sessions in unsaved windows |
+| `rypyunky` | gtk: relaunch registered programs when restoring sessions |
 
 ## Related implementation documentation
 

@@ -26,6 +26,7 @@ const gtk_key = @import("../key.zig");
 const ApprtSurface = @import("../Surface.zig");
 const Common = @import("../class.zig").Common;
 const Application = @import("application.zig").Application;
+const session_relaunch = @import("../session_relaunch.zig");
 const Config = @import("config.zig").Config;
 const ResizeOverlay = @import("resize_overlay.zig").ResizeOverlay;
 const SearchOverlay = @import("search_overlay.zig").SearchOverlay;
@@ -579,6 +580,9 @@ pub const Surface = extern struct {
         session_snapshot: ?u64 = null,
         session_snapshot_path: ?[:0]u8 = null,
         session_snapshot_bytes: ?[]u8 = null,
+        session_relaunch: ?session_relaunch.Record = null,
+        relaunch_idle: ?c_uint = null,
+        relaunch_timeout: ?c_uint = null,
         /// The configuration that this surface is using.
         config: ?*Config = null,
 
@@ -1277,6 +1281,7 @@ pub const Surface = extern struct {
         keycode: c_uint,
         gtk_mods: gdk.ModifierType,
     ) bool {
+        if (action != .release) self.cancelSessionRelaunch();
         //log.warn("keyEvent action={}", .{action});
         const event = ec_key.as(gtk.EventController).getCurrentEvent() orelse return false;
         const key_event = gobject.ext.cast(gdk.KeyEvent, event) orelse return false;
@@ -1938,6 +1943,7 @@ pub const Surface = extern struct {
     }
 
     fn dispose(self: *Self) callconv(.c) void {
+        self.cancelSessionRelaunch();
         if (Application.default().picker()) |service| service.cancelSurface(self, "pane_closed");
         const priv = self.private();
 
@@ -2196,6 +2202,85 @@ pub const Surface = extern struct {
         if (priv.session_id == 0)
             priv.session_id = @import("../session.zig").newId(@import("../../../global.zig").io());
         return priv.session_id;
+    }
+
+    pub fn captureSessionRelaunch(self: *Self, alloc: Allocator) !?session_relaunch.Record {
+        if (comptime @import("builtin").target.os.tag != .linux) return null;
+        const app = Application.default();
+        if (self.private().session_relaunch) |record| {
+            if (!app.sessionRelaunchAllowed(record.program)) return null;
+            return try record.clone(alloc);
+        }
+        const surface = self.core() orelse return null;
+        const pid = surface.getProcessInfo(.foreground_pid) orelse return null;
+        var buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+        const name = session_relaunch.processName(global.io(), pid, &buf) orelse return null;
+        if (!app.sessionRelaunchAllowed(name)) return null;
+        return session_relaunch.capture(alloc, global.io(), pid, name);
+    }
+
+    pub fn restoreSessionRelaunch(self: *Self, record: session_relaunch.Record) !void {
+        if (!record.valid() or !Application.default().sessionRelaunchAllowed(record.program)) return;
+        self.private().session_relaunch = try record.clone(Application.default().allocator());
+    }
+
+    pub fn cancelSessionRelaunch(self: *Self) void {
+        const priv = self.private();
+        if (priv.relaunch_idle) |id| _ = glib.Source.remove(id);
+        if (priv.relaunch_timeout) |id| _ = glib.Source.remove(id);
+        priv.relaunch_idle = null;
+        priv.relaunch_timeout = null;
+        if (priv.session_relaunch) |record| record.deinit(Application.default().allocator());
+        priv.session_relaunch = null;
+    }
+
+    /// Called only for a live prompt marker, never for restored screen cells.
+    pub fn shellReady(self: *Self) void {
+        const priv = self.private();
+        if (priv.session_relaunch == null or priv.relaunch_idle != null) return;
+        priv.relaunch_idle = glib.idleAdd(relaunchWhenReady, self);
+    }
+
+    fn showRelaunchToast(self: *Self, text: [*:0]const u8) void {
+        if (ext.getAncestor(Window, self.as(gtk.Widget))) |window| window.showLuaToast(std.mem.span(text));
+    }
+
+    fn relaunchTimedOut(ud: ?*anyopaque) callconv(.c) c_int {
+        const self: *Self = @ptrCast(@alignCast(ud orelse return 0));
+        self.private().relaunch_timeout = null;
+        self.cancelSessionRelaunch();
+        self.showRelaunchToast(i18n._("Program relaunch skipped: shell did not report readiness."));
+        return 0;
+    }
+
+    fn relaunchWhenReady(ud: ?*anyopaque) callconv(.c) c_int {
+        const self: *Self = @ptrCast(@alignCast(ud orelse return 0));
+        self.private().relaunch_idle = null;
+        const record = self.private().session_relaunch orelse return 0;
+        defer self.cancelSessionRelaunch();
+        const app = Application.default();
+        if (!app.sessionRelaunchAllowed(record.program)) return 0;
+        const surface = self.core() orelse return 0;
+        const pid = surface.getProcessInfo(.foreground_pid) orelse return 0;
+        var buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+        const name = session_relaunch.processName(global.io(), pid, &buf) orelse return 0;
+        const shell = session_relaunch.Shell.fromName(name) orelse {
+            self.showRelaunchToast(i18n._("Program relaunch skipped: unsupported shell."));
+            return 0;
+        };
+        var path_buf: [96]u8 = undefined;
+        const path = std.fmt.bufPrint(&path_buf, "/proc/{d}/cwd", .{pid}) catch return 0;
+        const len = std.Io.Dir.readLinkAbsolute(global.io(), path, &buf) catch return 0;
+        if (!std.mem.eql(u8, buf[0..len], record.cwd)) {
+            self.showRelaunchToast(i18n._("Program relaunch skipped: shell changed directory during startup."));
+            return 0;
+        }
+        const command = session_relaunch.command(app.allocator(), shell, record) catch return 0;
+        defer app.allocator().free(command);
+        surface.writeShellCommand(command) catch |err| {
+            log.warn("unable to relaunch saved program err={}", .{err});
+        };
+        return 0;
     }
 
     /// Restored panes start unfocused until GTK delivers a real focus event.
@@ -3408,6 +3493,7 @@ pub const Surface = extern struct {
         bytes: [*:0]u8,
         self: *Self,
     ) callconv(.c) void {
+        self.cancelSessionRelaunch();
         const priv = self.private();
         const str = std.mem.sliceTo(bytes, 0);
 
@@ -3724,6 +3810,8 @@ pub const Surface = extern struct {
         }
 
         // Emit the signal that we initialized the surface.
+        if (priv.session_relaunch != null)
+            priv.relaunch_timeout = glib.timeoutAdd(15_000, relaunchTimedOut, self);
         Surface.signals.init.impl.emit(
             self,
             null,

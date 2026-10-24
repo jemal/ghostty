@@ -21,6 +21,44 @@ Opening from a saved window or quick terminal still opens a separate window.
 An already-open session always focuses its existing window, leaving the source
 window intact. Restored terminals start fresh shells as usual.
 
+## Program relaunch (Linux)
+
+Register executable names in `init.lua` to relaunch selected programs when a
+saved session is opened:
+
+```lua
+ghostty.session.relaunch {
+  programs = { "hx", "jjui", "btop" },
+}
+```
+
+There is no default registration. This function works only while `init.lua`
+loads; registrations are additive, with at most 64 names. Names are executable
+basenames rather than aliases or paths. The current Lua registration governs
+both capture and relaunch, including sessions saved with older registrations.
+
+Saving captures the registered foreground program's argument array and working
+directory. Relaunch starts a fresh shell in that directory, waits for its live
+OSC 133 B/I ready-for-input marker, then submits a literally quoted command.
+Exiting the program returns to the shell. Nushell, bash, zsh, fish, sh, dash and
+ksh are recognized; shell integration must report prompt readiness. Typing or
+pasting cancels pending relaunch, as does a 15-second readiness timeout after
+the terminal initializes. Inactive tabs retain their record and wait until
+initialized. Removing a registration before the prompt arrives prevents launch.
+
+Missing directories, unknown shells, unreadable process information, redirected
+input/output, unsupported commands and disabled registrations fall back to a
+shell. A missing executable produces the shell's normal error and leaves it
+usable. If shell startup changes directory, relaunch is skipped. Nix wrapper
+names such as `.hx-wrapped` match `hx`; launch uses the current shell's PATH.
+
+This recreates a program, not its memory, buffers, selections, stdin, pipelines,
+environment, or devshell. For Helix, files opened after startup are not reflected
+in its original arguments. Relative arguments can also change meaning if the
+program changed its working directory. Exiting a program before the session is
+saved records the current foreground process instead. Existing sessions without
+relaunch records continue to restore ordinary shells.
+
 ## Saved and unsaved sessions (since 2026-10-23)
 
 Every new window is an **unsaved** session. It gets a random haiku name (an
