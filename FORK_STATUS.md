@@ -6,6 +6,17 @@ This document records the work completed across the development chats, the curre
 
 ## Current checkpoint
 
+- Desktop-approved on 2026-10-23: opening a closed saved session from an unsaved normal window
+  restores in place, preserving the host window's geometry. Saved source windows
+  and quick terminals still open separately; already-open sessions are focused.
+  Process confirmation precedes replacement. Cancellation and preparation errors
+  preserve current panes; archived-session changes wait for confirmation.
+  The GTK build with system Fontconfig, Zig formatting and all five focused
+  session manifest/storage tests passed. A pending-surface guard prevents the
+  last old terminal's disposal from triggering application quit before restored
+  terminals initialize. The ReleaseFast build with system Fontconfig is installed
+  to `~/.local`, and the user's desktop test passed. Recorded in jj change
+  `kqzsmzko`. Active processes were not restarted by the agent.
 - Installed on 2026-10-23 at the user's request: quick terminals now follow `window-show-tab-bar` even with
   `gtk-titlebar-style = tabs`: auto hides a single tab and reveals multiple
   tabs. Explicit always/never and manual toolbar overrides remain available.
@@ -542,6 +553,8 @@ upstream; `main` tracks `main@origin`. Never push `folie` to `origin`.
 | `yusoxzrx` | gtk: reset an inherited font size to the configured size |
 | `xslmnnxk` | gtk: make sessions unsaved until the user saves them |
 | `mnzxlrvt` | docs: record the 2026-10-23 fork work in FORK_STATUS.md |
+| `zxrltonz` | gtk: refine tab sizing and automatic toolbar visibility |
+| `kqzsmzko` | gtk: restore saved sessions in unsaved windows |
 
 ## Related implementation documentation
 

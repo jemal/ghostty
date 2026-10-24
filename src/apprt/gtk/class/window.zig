@@ -343,6 +343,9 @@ pub const Window = extern struct {
         archive_on_close: bool = false,
         session_archived: bool = false,
         session_saved: bool = false,
+        replacing_session: bool = false,
+        session_surface_pending: bool = false,
+        session_restore_pending: bool = false,
         toolbar_visible_override: ?bool = null,
 
         theme: ThemePicker.State = .{},
@@ -979,7 +982,26 @@ pub const Window = extern struct {
                     .{},
                 );
             }
+            if (priv.session_surface_pending) {
+                _ = Surface.signals.init.connect(
+                    surface,
+                    *Self,
+                    restoredSurfaceInitialized,
+                    self,
+                    .{},
+                );
+            }
         }
+    }
+
+    fn restoredSurfaceInitialized(_: *Surface, self: *Self) callconv(.c) void {
+        self.private().session_surface_pending = false;
+    }
+
+    /// Restored widgets exist before GTK allocates and initializes their cores.
+    /// Losing the old window's last core during that gap must not quit the app.
+    pub fn hasPendingSessionSurface(self: *Self) bool {
+        return self.private().session_surface_pending;
     }
 
     /// Disconnect all the surface handlers for the given tree. This should
@@ -1177,6 +1199,129 @@ pub const Window = extern struct {
         return window;
     }
 
+    /// Opening from a disposable window reuses its toplevel. Saved windows and
+    /// quick terminals retain the normal open-or-focus behavior.
+    pub fn openSession(self: *Self, id: u64, archived: bool) !void {
+        const app = Application.default();
+        if (!app.sessionsEnabled()) return;
+        if (self.isQuickTerminal() or self.isSessionSaved() or app.sessionWindow(id) != null) {
+            try openSessionWindow(id, archived);
+            return;
+        }
+        if (self.private().session_restore_pending) return error.SessionRestorePending;
+        if (!self.getNeedsConfirmQuit()) return self.replaceSession(id, archived);
+
+        const request = try app.allocator().create(SessionRestoreRequest);
+        request.* = .{ .window = self.ref(), .id = id, .archived = archived };
+        self.private().session_restore_pending = true;
+        const dialog = adw.AlertDialog.new(
+            i18n._("Restore Session Here?"),
+            i18n._("All terminal sessions in this unsaved window will be terminated and replaced by the saved session."),
+        );
+        dialog.addResponse("cancel", i18n._("Cancel"));
+        dialog.addResponse("restore", i18n._("Restore"));
+        dialog.setResponseAppearance("restore", .destructive);
+        dialog.setDefaultResponse("cancel");
+        dialog.setCloseResponse("cancel");
+        dialog.choose(self.as(gtk.Widget), null, sessionRestoreConfirmed, request);
+    }
+
+    const SessionRestoreRequest = struct { window: *Self, id: u64, archived: bool };
+
+    fn openSessionWindow(id: u64, archived: bool) !void {
+        const app = Application.default();
+        const unarchive = archived and app.sessionWindow(id) == null;
+        if (unarchive) try app.archiveSession(id, false);
+        errdefer if (unarchive) app.archiveSession(id, true) catch |err| {
+            log.warn("unable to roll back session unarchive err={}", .{err});
+        };
+        try app.openSession(id);
+    }
+
+    fn sessionRestoreConfirmed(source: ?*gobject.Object, result: *gio.AsyncResult, ud: ?*anyopaque) callconv(.c) void {
+        const request: *SessionRestoreRequest = @ptrCast(@alignCast(ud orelse return));
+        const self = request.window;
+        defer self.unref();
+        defer Application.default().allocator().destroy(request);
+        self.private().session_restore_pending = false;
+        const dialog = gobject.ext.cast(adw.AlertDialog, source orelse return) orelse return;
+        const response = dialog.chooseFinish(result);
+        if (self.as(gtk.Widget).getMapped() == 0) return;
+        if (std.mem.orderZ(u8, response, "restore") != .eq) {
+            if (self.getActiveSurface()) |surface| surface.grabFocus();
+            return;
+        }
+        self.replaceSession(request.id, request.archived) catch |err| {
+            log.warn("unable to restore session in place err={}", .{err});
+            self.addToast(i18n._("Unable to restore this session."));
+        };
+    }
+
+    fn replaceSession(self: *Self, id: u64, archived: bool) !void {
+        const app = Application.default();
+        // The window may have been saved, or the destination opened elsewhere,
+        // while its confirmation dialog was waiting.
+        if (self.isSessionSaved() or app.sessionWindow(id) != null) {
+            try openSessionWindow(id, archived);
+            return;
+        }
+        if (!app.sessionsEnabled()) return;
+        // Defer unarchiving until confirmation, and undo it on load failure.
+        if (archived) try app.archiveSession(id, false);
+        errdefer if (archived) app.archiveSession(id, true) catch |err| {
+            log.warn("unable to roll back session unarchive err={}", .{err});
+        };
+        const dir = try app.sessionDir();
+        defer dir.close(global.io());
+        const manifest = try sessions.load(dir, global.io(), app.allocator(), id);
+        defer manifest.deinit();
+
+        // Build everything offscreen before touching the current layout. Page
+        // transfers are the same native operation used for moving live tabs.
+        const staged = try Self.restoreSession(manifest.value);
+        defer staged.as(gtk.Window).destroy();
+        staged.private().session_saved = false;
+        staged.private().replacing_session = true;
+        const priv = self.private();
+        priv.replacing_session = true;
+        priv.session_surface_pending = true;
+        defer priv.replacing_session = false;
+        self.cancelThemePicker();
+        if (app.picker()) |service| service.cancelWindow(self);
+        const old_count = priv.tab_view.getNPages();
+        const staged_view = staged.private().tab_view;
+        const selected = staged_view.getSelectedPage();
+        while (staged_view.getNPages() > 0) {
+            staged_view.transferPage(staged_view.getNthPage(0), priv.tab_view, priv.tab_view.getNPages());
+        }
+        var remaining = old_count;
+        while (remaining > 0) : (remaining -= 1) {
+            const page = priv.tab_view.getNthPage(0);
+            // Move the old layout into the hidden staging window for disposal.
+            // This also handles tabs already waiting on a close confirmation.
+            const position = if (page.getPinned() != 0)
+                staged_view.getNPinnedPages()
+            else
+                staged_view.getNPages();
+            priv.tab_view.transferPage(page, staged_view, position);
+        }
+        priv.session_id = manifest.value.id;
+        priv.session_hash = null;
+        priv.session_archived = false;
+        priv.archive_on_close = false;
+        // Do not apply saved window geometry: this is the same desktop window.
+        priv.surface_init = true;
+        self.setSessionName(manifest.value.name);
+        self.setTitleOverride(manifest.value.title);
+        self.markSessionSaved();
+        if (selected) |page| priv.tab_view.setSelectedPage(page);
+        if (self.getActiveSurface()) |surface| {
+            if (surface.core() != null) priv.session_surface_pending = false;
+            surface.grabFocus();
+        }
+        app.saveSessions();
+    }
+
     fn restoreSessionNode(widget: *SplitTree, session_id: u64, nodes: []const sessions.Node, index: u32) std.mem.Allocator.Error!Surface.Tree {
         const alloc = Application.default().allocator();
         switch (nodes[index]) {
@@ -1313,7 +1458,7 @@ pub const Window = extern struct {
 
     fn actionOpenSession(_: *gio.SimpleAction, param: ?*glib.Variant, self: *Self) callconv(.c) void {
         const value = param orelse return;
-        Application.default().openSession(value.getUint64()) catch |err| {
+        self.openSession(value.getUint64(), false) catch |err| {
             log.warn("unable to open session err={}", .{err});
             self.addToast(i18n._("Unable to restore this session."));
         };
@@ -2308,6 +2453,7 @@ pub const Window = extern struct {
     ) callconv(.c) void {
         const priv = self.private();
         self.as(gobject.Object).notifyByPspec(properties.@"toolbar-visible".impl.param_spec);
+        if (priv.replacing_session) return;
         if (priv.tab_view.getNPages() == 0) {
             // If we have no pages left then we want to close window.
 

@@ -902,6 +902,16 @@ pub const Application = extern struct {
         // Cancel any previous timer.
         self.stopQuitTimer();
 
+        // In-place restore can dispose the last initialized core before GTK
+        // allocates its replacement. The window still owns restored terminals;
+        // their init callback clears this guard and addSurface stops the timer.
+        var current: ?*glib.List = self.as(gtk.Application).getWindows();
+        while (current) |link| : (current = link.f_next) {
+            const ptr: *gtk.Window = @ptrCast(@alignCast(link.f_data orelse continue));
+            const window = gobject.ext.cast(Window, ptr) orelse continue;
+            if (window.hasPendingSessionSurface()) return;
+        }
+
         // This is a no-op unless we are configured to quit after last window is closed.
         if (!config.@"quit-after-last-window-closed") return;
 

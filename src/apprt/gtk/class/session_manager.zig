@@ -380,12 +380,8 @@ pub const SessionManager = extern struct {
             self.failed(err);
             return;
         };
-        const app = Application.default();
-        if (item.archived) app.archiveSession(id, false) catch |err| {
-            self.failed(err);
-            return;
-        };
-        app.openSession(id) catch |err| {
+        const window = ext.getAncestor(Window, self.as(gtk.Widget)) orelse return;
+        window.openSession(id, item.archived) catch |err| {
             self.failed(err);
             return;
         };

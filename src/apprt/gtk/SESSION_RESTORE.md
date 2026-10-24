@@ -9,6 +9,18 @@ Sessions overlay, where you can save, create, rename, reopen, archive, or
 delete sessions. Opening a session that is already open focuses its window
 without creating a copy.
 
+Opening a closed saved session from an unsaved normal window restores into
+that same window, replacing all of its tabs and splits while keeping its
+current position, size, and maximized/fullscreen state. The normal running-process
+confirmation applies before replacement. Canceling keeps the original panes
+and processes; a manifest or layout preparation failure also leaves them intact.
+Archived sessions are unarchived only after confirmation and rearchived if
+preparation fails.
+
+Opening from a saved window or quick terminal still opens a separate window.
+An already-open session always focuses its existing window, leaving the source
+window intact. Restored terminals start fresh shells as usual.
+
 ## Saved and unsaved sessions (since 2026-10-23)
 
 Every new window is an **unsaved** session. It gets a random haiku name (an
