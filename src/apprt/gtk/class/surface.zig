@@ -3698,6 +3698,16 @@ pub const Surface = extern struct {
         errdefer surface.deinit();
         surface.wait_after_command_override = priv.overrides.wait_after_command;
 
+        // An inherited font size is a zoom from the parent surface. The
+        // surface was created with it, so the core takes it as the original
+        // size. Reset must go back to the configured size instead, and a
+        // config reload must keep the zoom like any other adjustment.
+        if (priv.font_size_request) |size| {
+            const configured = priv.config.?.get().@"font-size";
+            surface.config.original_font_size = configured;
+            surface.font_size_adjusted = size.points != configured;
+        }
+
         // Store it!
         priv.core_surface = surface;
         priv.desktop_notifications = .init(surface.id);
