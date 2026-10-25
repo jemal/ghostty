@@ -4,6 +4,11 @@ A file for [guiding coding agents](https://agents.md/).
 
 ## Commands
 
+- For UI changes, create or update a local HTML draft first and get the
+  user's feedback before implementing the design in GTK. The current draft
+  is `design/ui-draft/index.html`. Preserve pane gaps and rounding unless the
+  user explicitly requests changing them.
+
 - **Build:** `zig build`
   - If you're on macOS and don't need to build the macOS app, use
     `-Demit-macos-app=false` to skip building the app bundle and speed up

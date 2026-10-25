@@ -38,8 +38,8 @@ pub fn write(writer: *std.Io.Writer, config: *const Config, selector: []const u8
         \\  background: var(--ghostty-chrome-bg);
         \\  color: var(--ghostty-fg);
         \\}}
-        \\{s} tabbar.compact-tabs .box scrolledwindow {{
-        \\  background: var(--ghostty-rail-bg);
+        \\{s} .tab-strip-header.compact-tabs {{
+        \\  background: var(--ghostty-bg);
         \\}}
         \\{s} :is(.native-picker, .floating-terminal) {{
         \\  background: var(--ghostty-raised-bg);

@@ -201,6 +201,7 @@ pub const Tab = extern struct {
         surface: *Surface, // owned by the panel's scrolled window
         widget: *gtk.Box,
         button: *gtk.Button,
+        title: *gtk.Label,
         close: *gtk.Button,
         name: ?[:0]const u8,
         geometry: sessions.FloatGeometry,
@@ -328,13 +329,22 @@ pub const Tab = extern struct {
         panel.as(gtk.Widget).setVisible(0);
         const header = gtk.Box.new(.horizontal, 0);
         header.as(gtk.Widget).addCssClass("floating-titlebar");
-        const button = gtk.Button.newWithLabel(surface.getEffectiveTitle() orelse name orelse "Terminal");
+        const button = gtk.Button.new();
         button.as(gtk.Widget).addCssClass("flat");
         button.as(gtk.Widget).setFocusOnClick(0);
         button.as(gtk.Widget).setHexpand(1);
-        const label = gobject.ext.cast(gtk.Label, button.getChild().?).?;
+        const label = gtk.Label.new(surface.getEffectiveTitle() orelse name orelse "Terminal");
         label.setEllipsize(.end);
         label.setXalign(0);
+        label.as(gtk.Widget).setHexpand(1);
+        // Reserve the indicator's geometry in every focus state.
+        const title_content = gtk.Box.new(.horizontal, 9);
+        const focus_dot = gtk.Box.new(.horizontal, 0);
+        focus_dot.as(gtk.Widget).addCssClass("pane-focus-dot");
+        focus_dot.as(gtk.Widget).setValign(.center);
+        title_content.append(focus_dot.as(gtk.Widget));
+        title_content.append(label.as(gtk.Widget));
+        button.setChild(title_content.as(gtk.Widget));
         const close = gtk.Button.newFromIconName("window-close-symbolic");
         close.as(gtk.Widget).addCssClass("flat");
         close.as(gtk.Widget).setFocusOnClick(0);
@@ -345,7 +355,7 @@ pub const Tab = extern struct {
         const scrolled = gobject.ext.newInstance(SurfaceScrolledWindow, .{ .surface = surface });
         scrolled.as(gtk.Widget).setVexpand(1);
         panel.append(scrolled.as(gtk.Widget));
-        priv.floating.appendAssumeCapacity(.{ .surface = surface, .widget = panel, .button = button, .close = close, .name = copy, .geometry = geometry });
+        priv.floating.appendAssumeCapacity(.{ .surface = surface, .widget = panel, .button = button, .title = label, .close = close, .name = copy, .geometry = geometry });
         priv.content.addOverlay(panel.as(gtk.Widget));
         priv.content.setClipOverlay(panel.as(gtk.Widget), 1);
         _ = gtk.Button.signals.clicked.connect(button, *Self, floatingTitleClicked, self, .{});
@@ -565,11 +575,8 @@ pub const Tab = extern struct {
         const index = self.floatingIndex(surface) orelse return;
         const entry = self.private().floating.items[index];
         const title = surface.getEffectiveTitle() orelse entry.name orelse "Terminal";
-        entry.button.setLabel(title);
+        entry.title.setLabel(title);
         entry.button.as(gtk.Widget).setTooltipText(title);
-        const label = gobject.ext.cast(gtk.Label, entry.button.getChild().?).?;
-        label.setEllipsize(.end);
-        label.setXalign(0);
     }
 
     fn floatingCloseRequest(surface: *Surface, self: *Self) callconv(.c) void {

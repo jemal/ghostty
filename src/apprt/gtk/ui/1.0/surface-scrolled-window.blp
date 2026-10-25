@@ -22,10 +22,18 @@ template $GhostttySurfaceScrolledWindow: Adw.Bin {
           hexpand: true;
           focus-on-click: false;
           clicked => $focus_pane();
-          child: Gtk.Label pane_title {
-            label: _("Terminal");
-            ellipsize: end;
-            xalign: 0;
+          child: Gtk.Box {
+            spacing: 9;
+            Gtk.Box {
+              styles ["pane-focus-dot"]
+              valign: center;
+            }
+            Gtk.Label pane_title {
+              label: _("Terminal");
+              ellipsize: end;
+              xalign: 0;
+              hexpand: true;
+            }
           };
         }
         Gtk.Button {

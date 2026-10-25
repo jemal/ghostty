@@ -12,120 +12,118 @@ window.ssd.no-border-radius {
   border-radius: 0 0;
 }
 
-/* Compact tabs keep AdwTabBar's native interactions, overflow, and focus
- * rings. Scope these rules to the opted-in bar so overview thumbnails and
- * other application windows retain their desktop styling.
- */
-.window tabbar.compact-tabs .box scrolledwindow {
-  margin-top: 2px;
-  margin-bottom: 2px;
-  border-radius: 17px;
-  background: color-mix(in srgb, currentColor 5%, transparent);
+/* Compact presentation owns tab geometry; AdwTabView owns tab behavior. */
+.window .tab-strip-header.compact-tabs {
+  min-height: 38px;
+  background: var(--window-bg-color);
+  color: var(--window-fg-color);
 }
 
-.window tabbar.compact-tabs tabbox {
-  min-height: 32px;
-  padding-top: 3px;
-  padding-bottom: 3px;
-}
-
-.window tabbar.compact-tabs tabbox > tabboxchild {
-  border-radius: 14px;
-}
-
-.window tabbar.compact-tabs tabbox > separator:not(.hidden) {
-  margin-top: 7px;
-  margin-bottom: 7px;
-  background: color-mix(in srgb, currentColor 20%, transparent);
-  opacity: 1;
-}
-
-.window tabbar.compact-tabs tab {
-  min-height: 26px;
-  padding: 0 6px;
-  border-radius: 14px;
+.window .compact-tab-scroll {
   background: transparent;
 }
 
-.window tabbar.compact-tabs .box {
-  padding: 0;
+.window .compact-tab-box {
+  padding: 3px 4px;
 }
 
-.window tabbar.compact-tabs .start-action,
-.window tabbar.compact-tabs .end-action {
-  padding: 1px 3px;
+.window .compact-tab {
+  min-height: 25px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--window-fg-color) 4%, var(--window-bg-color));
+  color: color-mix(in srgb, var(--window-fg-color) 65%, var(--window-bg-color));
+  font-size: 15px;
 }
 
-.window tabbar.compact-tabs .start-action button,
-.window tabbar.compact-tabs .end-action button {
-  min-width: 24px;
-  min-height: 24px;
-  padding: 2px;
+.window .compact-tab:hover {
+  background: color-mix(in srgb, var(--window-fg-color) 7%, var(--window-bg-color));
+  color: var(--window-fg-color);
 }
 
-.window tabbar.compact-tabs tab button.image-button {
-  min-width: 20px;
-  min-height: 20px;
+.window .compact-tab.selected {
+  background: color-mix(in srgb, var(--accent-color) 14%, var(--window-bg-color));
+  border-color: color-mix(in srgb, var(--accent-color) 45%, transparent);
+  color: var(--window-fg-color);
 }
 
-.window tabbar.compact-tabs tab .tab-title {
+@keyframes compact-attention-arrival {
+  0%, 38%, 100% { background: color-mix(in srgb, var(--window-fg-color) 4%, var(--window-bg-color)); }
+  15% { background: color-mix(in srgb, var(--accent-color) 16%, var(--window-bg-color)); }
+  58% { background: color-mix(in srgb, var(--accent-color) 10%, var(--window-bg-color)); }
+}
+.window .compact-tab.attention-pulse:not(.selected) {
+  animation: compact-attention-arrival 1200ms ease-out 1;
+}
+.window .compact-tab .attention-marker { color: var(--accent-color); font-size: 15px; }
+.window .compact-tab.needs-attention .compact-tab-close { opacity: 0; }
+.window .compact-tab.needs-attention:hover .compact-tab-close,
+.window .compact-tab.needs-attention:focus-within .compact-tab-close { opacity: 0.65; }
+.window .compact-tab:hover .attention-marker,
+.window .compact-tab:focus-within .attention-marker { opacity: 0; }
+.window .compact-tab-tools button {
+  min-width: 20px; min-height: 25px; padding: 0 3px; margin: 0;
+  background: transparent; border: none; box-shadow: none;
+  color: inherit;
+}
+
+.window .compact-tab button {
+  min-height: 23px;
+  min-width: 0;
+  margin: 0;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  color: inherit;
   font-weight: 400;
-  opacity: 0.78;
+  border-radius: 5px;
 }
 
-.window tabbar.compact-tabs tab:selected .tab-title {
-  font-weight: 500;
+.window .compact-tab-select {
+  padding: 0 0 0 10px;
 }
 
-.window tabbar.compact-tabs tab:selected .tab-title,
-.window tabbar.compact-tabs tab:hover .tab-title,
-.window tabbar.compact-tabs tab:focus-within .tab-title {
+.window .compact-tab.inverted .compact-tab-select {
+  padding: 0 10px 0 0;
+}
+
+.window .compact-tab.drop-before {
+  box-shadow: -2px 0 var(--accent-color);
+}
+
+.window .compact-tab.drop-after {
+  box-shadow: 2px 0 var(--accent-color);
+}
+
+.window .compact-tab-close {
+  padding: 0 8px;
+  opacity: 0.65;
+}
+
+.window .compact-tab-close:hover {
   opacity: 1;
-}
-
-.window tabbar.compact-tabs tab:hover {
   background: color-mix(in srgb, currentColor 7%, transparent);
 }
 
-.window tabbar.compact-tabs tab:selected {
-  background: var(--active-toggle-bg-color);
-  box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, currentColor 8%, transparent),
-    0 1px 2px rgba(0, 0, 0, 0.08);
-}
-
-.window tabbar.compact-tabs tab:selected:hover {
-  background: color-mix(
-    in srgb,
-    var(--active-toggle-bg-color) 96%,
-    currentColor
-  );
-}
-
-.window tabbar.compact-tabs tab:active {
-  background: color-mix(in srgb, currentColor 20%, transparent);
-}
-
-.window tabbar.compact-tabs .start-action button.session-selector {
-  min-height: 32px;
-  padding: 3px 10px;
+.window .tab-strip-header.compact-tabs .session-selector {
+  min-height: 27px;
+  font-size: 15px;
+  padding: 0 10px;
   margin-left: 4px;
-  margin-right: 10px;
+  margin-right: 6px;
   border: none;
-  border-radius: 9px;
+  border-radius: 7px;
   box-shadow: none;
   background: transparent;
-  transition: background-color 160ms ease;
 }
 
-.window tabbar.compact-tabs .start-action button.session-selector:hover,
-.window tabbar.compact-tabs .start-action button.session-selector:checked {
+.window .tab-strip-header.compact-tabs .session-selector:hover {
   background: color-mix(in srgb, currentColor 7%, transparent);
 }
 
 .window .session-selector .session-name {
   font-size: 1em;
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .window .session-selector .session-name.dim-label {
@@ -139,19 +137,19 @@ window.ssd.no-border-radius {
 }
 
 .window .tabbar-status {
+  font-size: 13px;
   margin-left: 14px;
   margin-right: 12px;
   font-variant-numeric: tabular-nums;
 }
 
 @media (prefers-contrast: more) {
-  .window tabbar.compact-tabs tab .tab-title {
-    opacity: 1;
+  .window .compact-tab {
+    color: var(--window-fg-color);
   }
 
-  .window tabbar.compact-tabs tab:selected,
-  .window tabbar.compact-tabs .start-action button.session-selector {
-    box-shadow: inset 0 0 0 1px currentColor;
+  .window .compact-tab.selected {
+    border-color: currentColor;
   }
 }
 
@@ -419,16 +417,6 @@ label.resize-overlay {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
 }
 
-.floating-titlebar {
-  background: color-mix(in srgb, currentColor 5%, transparent);
-  border-bottom: 1px solid color-mix(in srgb, currentColor 12%, transparent);
-}
-
-.floating-titlebar button {
-  padding: 4px 6px;
-  min-height: 22px;
-}
-
 /* Tiled pane chrome is opt-in and leaves terminal padding to the renderer. */
 .window.pane-decorations .split paned > separator {
   /* Keep the divider's allocation and input handling for mouse resizing.
@@ -462,20 +450,81 @@ label.resize-overlay {
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
 }
 
-.pane-titlebar {
-  background: color-mix(in srgb, currentColor 5%, transparent);
-  border-bottom: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+.pane-titlebar,
+.floating-titlebar {
+  font-size: 14px;
+  background: color-mix(in srgb, var(--window-fg-color) 2%, var(--window-bg-color));
+  border-bottom: 1px solid color-mix(in srgb, currentColor 3%, transparent);
+  transition: background-color 160ms ease, box-shadow 160ms ease;
 }
 
-.pane-titlebar button {
+/* Quiet focused headers share the compact tab accent without a colored edge. */
+.decorated-pane.active .pane-titlebar,
+.stack-member.active .pane-titlebar,
+.floating-terminal.active .floating-titlebar {
+  background: color-mix(in srgb, var(--accent-color) 3%, var(--window-bg-color));
+}
+
+.pane-titlebar label,
+.floating-titlebar label {
+  /* Focus must not change text metrics or move/truncate the title. */
+  font-weight: 500;
+}
+
+.pane-focus-dot {
+  min-width: 5px;
+  min-height: 5px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--window-fg-color) 30%, transparent);
+}
+
+.active > .pane-titlebar .pane-focus-dot,
+.active > .floating-titlebar .pane-focus-dot {
+  background: var(--accent-color);
+}
+
+.pane-titlebar button,
+.floating-titlebar button {
   padding: 4px 6px;
-  min-height: 22px;
+  min-height: 21px;
 }
 
-.decorated-pane:not(.active) .pane-titlebar label {
+.pane-titlebar button:first-child,
+.floating-titlebar button:first-child {
+  padding-left: 12px;
+}
+
+.pane-titlebar button:last-child,
+.floating-titlebar button:last-child {
+  padding-right: 12px;
+  /* Reserve the close control's width even while its icon is hidden. */
+  opacity: 0;
+}
+
+.decorated-pane.active > .pane-titlebar button:last-child,
+.decorated-pane:hover > .pane-titlebar button:last-child,
+.decorated-pane:focus-within > .pane-titlebar button:last-child,
+.stack-member.active > .pane-titlebar button:last-child,
+.stack-member:hover > .pane-titlebar button:last-child,
+.stack-member:focus-within > .pane-titlebar button:last-child,
+.floating-terminal.active > .floating-titlebar button:last-child,
+.floating-terminal:hover > .floating-titlebar button:last-child,
+.floating-terminal:focus-within > .floating-titlebar button:last-child {
+  opacity: 1;
+}
+
+.decorated-pane:not(.active) .pane-titlebar label,
+.floating-terminal:not(.active) .floating-titlebar label {
   opacity: 0.65;
 }
 
 .pane-titlebar label {
   transition: opacity 160ms ease;
 }
+
+/* Pinned chips reserve the same marker space without exposing a close action. */
+.window .compact-tab.pinned .compact-tab-close,
+.window .compact-tab.pinned.needs-attention:hover .compact-tab-close,
+.window .compact-tab.pinned.needs-attention:focus-within .compact-tab-close { opacity: 0; }
+.window .compact-tab.pinned:hover .attention-marker,
+.window .compact-tab.pinned:focus-within .attention-marker { opacity: 1; }

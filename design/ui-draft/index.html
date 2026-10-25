@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ghostty — UI study</title>
+<style>
+  :root { color-scheme: dark; --bg:#1e1f27; --bar:#252630; --header:#22232c; --line:#30323d; --text:#c5c6cd; --muted:#797d8d; --accent:#8fa7bd; --tint:8%; --gap:1px; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:#15161c; color:var(--text); font:13px "IBM Plex Sans",system-ui,sans-serif; }
+  button, input, select { font:inherit; }
+  button { color:inherit; cursor:pointer; }
+  button:focus-visible, select:focus-visible, input:focus-visible { outline:2px solid var(--accent); outline-offset:-3px; }
+  .study { max-width:1600px; margin:auto; padding:30px 36px 20px; }
+  .intro { display:flex; justify-content:space-between; align-items:end; gap:24px; margin-bottom:22px; }
+  h1 { font-size:20px; font-weight:550; letter-spacing:-.5px; margin:0 0 7px; }
+  .intro p { margin:0; color:var(--muted); font-size:13px; }
+  .tag { color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:1.5px; }
+  .window { height: min(76vh, 900px); min-height:510px; border:1px solid #3a3d49; border-radius:9px; overflow:hidden; box-shadow:0 24px 80px #0004; display:flex; flex-direction:column; }
+  .topbar { display:flex; height:34px; min-height:34px; flex-shrink:0; background:var(--bar); border-bottom:1px solid var(--line); }
+  .session { display:flex; align-items:center; gap:10px; padding:0 20px 0 15px; background:none; border:0; border-right:1px solid var(--line); font-weight:550; white-space:nowrap; }
+  .ghost { font-size:20px; color:var(--text); }
+  .chevron { font-size:10px; color:var(--muted); margin-left:8px; }
+  .tabs { display:flex; flex:1; min-width:0; overflow-x:auto; scrollbar-width:thin; }
+  .tab { border:0; border-right:1px solid var(--line); border-radius:0; background:transparent; color:var(--muted); min-width:140px; max-width:270px; padding:0 16px; display:flex; align-items:center; gap:10px; position:relative; }
+  .tab:hover { background:#ffffff04; color:var(--text); }
+  .tab.selected { background:var(--bg); color:var(--text); }
+  .tab.selected::before { content:""; position:absolute; height:2px; background:var(--accent); inset:0 0 auto; opacity:.75; }
+  .tab .close { margin-left:auto; padding-left:25px; color:var(--muted); font-size:16px; }
+  /* Tab studies share the same pane geometry. */
+  body:not(.tabs-raised) .topbar { background:var(--bg); }
+  body:not(.tabs-raised) .session { border-right:0; }
+  body:not(.tabs-raised) .tab { border-right:0; min-width:120px; max-width:240px; }
+  body:not(.tabs-raised) .tab.selected { background:transparent; }
+  body:not(.tabs-raised) .tab.selected::before { inset:auto 16px 0; height:2px; }
+  .tab .close { opacity:0; }
+  .tab:hover .close,.tab:focus-visible .close { opacity:1; }
+  .tabs-raised .topbar { padding:3px 0 0; }
+  .tabs-raised .tab { border:1px solid transparent; border-bottom:0; border-radius:7px 7px 0 0; margin-right:3px; }
+  .tabs-raised .tab.selected { border-color:var(--line); }
+  .tabs-raised .tab.selected::before { display:none; }
+  .tabs-text .tab { min-width:0!important; padding:0 18px; }
+  .tabs-text .tab.selected::before { display:none; }
+  .tabs-text .tab.selected { font-weight:600; }
+  .tabs-text .tab.selected .tab-icon { width:5px; height:5px; background:var(--accent); border-radius:50%; font-size:0; }
+  .tabs-text .tab:not(.selected) .tab-icon { display:none; }
+  .tabs-text .tab .close { display:none; }
+  /* Reference study: compact labels sit on the workspace surface. */
+  .tabs-reference .topbar { background:var(--bg); height:38px; min-height:38px; border-bottom:0; align-items:center; }
+  .tabs-reference .tabs { align-items:center; gap:4px; height:100%; padding:0 4px; }
+  .tabs-reference .tab { flex:none; min-width:0!important; height:27px; max-width:240px; padding:0 10px; gap:9px; border:1px solid transparent!important; border-radius:7px; font-size:15px; }
+  .tabs-reference .tab.selected { background:color-mix(in srgb,var(--accent) 14%,var(--bg))!important; border-color:color-mix(in srgb,var(--accent) 45%,transparent)!important; }
+  .tabs-reference .tab:not(.selected) { background:color-mix(in srgb,var(--text) var(--inactive-tint, 4%),var(--bg)); }
+  .tabs-reference .tab:not(.selected):hover { background:color-mix(in srgb,var(--text) 7%,var(--bg)); }
+  .tabs-reference .tab.selected::before { display:none; }
+  .tabs-reference .tab .tab-icon { display:none; }
+  .tabs-reference .tab .close { padding-left:6px; opacity:.65; font-size:14px; }
+  .tabs-reference .session { height:27px; font-size:15px; padding:0 12px; }
+  .tabs-reference .ghost { font-size:17px; }
+  .tabs-reference .tools { font-size:13px; }
+  .tab-icon { color:var(--accent); font-size:12px; }
+  .tools { display:flex; align-items:center; gap:18px; padding:0 16px; color:var(--muted); font-size:12px; }
+  .tool { border:0; background:none; padding:5px; font-size:17px; }
+  /* Match Ghostty's decorated panes: 3px outer margins, 8px corners,
+     a 1px frame and the retained split-handle allocation between panes. */
+  .workspace { flex:1; min-height:0; display:grid; grid-template-columns:1fr 1fr; gap:1px; background:var(--bg); }
+  .right { display:grid; grid-template-rows:1fr 1fr; gap:1px; min-height:0; }
+  .bottom { display:grid; grid-template-columns:1fr 1fr; gap:1px; min-height:0; }
+  .pane { margin:3px; border:1px solid color-mix(in srgb,var(--text) 12%,transparent); border-radius:8px; overflow:hidden; min-width:0; min-height:0; background:var(--bg); display:flex; flex-direction:column; position:relative; outline:none; }
+  .pane.active { border-color:color-mix(in srgb,var(--text) 24%,transparent); box-shadow:0 2px 6px #00000026; }
+  .pane-header { display:flex; align-items:center; gap:9px; height:30px; flex-shrink:0; padding:0 12px; background:color-mix(in srgb,var(--text) 2%,var(--bg)); color:var(--muted); font-size:14px; border-bottom:1px solid color-mix(in srgb,var(--line) 25%,transparent); }
+  .pane.active .pane-header { color:var(--text); background:color-mix(in srgb,var(--accent) var(--tint),var(--bg)); }
+  /* Fixed metrics on focus: only colors change; glyph widths stay put. */
+  .pane-header .path { font-weight:500; }
+  .focus-dot { width:5px; height:5px; border-radius:50%; background:var(--muted); opacity:.4; }
+  .pane.active .focus-dot { background:var(--accent); opacity:1; }
+  .pane-header .path { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+  .pane-header button { background:none; border:0; margin-left:auto; color:var(--muted); font-size:14px; opacity:0; padding:2px 4px; }
+  .pane:hover .pane-header button, .pane.active .pane-header button, .pane-header button:focus-visible { opacity:1; }
+  .terminal { padding:18px; overflow:auto; font:12px/1.8 ui-monospace,"Cascadia Code","DejaVu Sans Mono",monospace; flex:1; }
+  .terminal p { margin:0; white-space:pre-wrap; }
+  .dim { color:var(--term-muted, var(--muted)); } .green { color:var(--term-green, #99ad91); } .blue { color:var(--term-blue, #91aabe); } .yellow { color:var(--term-yellow, #c4b58f); }
+  .prompt { display:flex; gap:9px; align-items:center; margin-top:4px; }
+  .cursor { display:inline-block; height:15px; width:7px; border:1px solid var(--muted); vertical-align:middle; }
+  .pane.active .cursor { background:var(--text); border-color:var(--text); }
+  .editor-line { display:flex; gap:20px; white-space:pre; } .number { width:18px; text-align:right; color:#4e5262; user-select:none; }
+  .topbar > .session { flex-shrink:0; color:var(--muted); gap:8px; }
+  .topbar > .session:hover { color:var(--text); }
+  .session-state { width:5px; height:5px; border:1px solid var(--muted); border-radius:50%; }
+  .lua-status { font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .tab-label { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .controls { display:flex; align-items:center; flex-wrap:wrap; gap:22px; padding:20px 0 14px; color:var(--muted); font-size:12px; }
+  .controls label { display:flex; align-items:center; gap:9px; }
+  select { background:#252630; color:var(--text); border:1px solid #393b47; border-radius:5px; padding:5px 8px; }
+  input { accent-color:var(--accent); } input[type=range] { width:90px; }
+  .note { color:var(--muted); font-size:12px; margin:0; }
+  .no-headers .pane-header { display:none; }
+  .empty .content { display:none; }
+  .fullscreen .study { padding:0; max-width:none; } .fullscreen .intro,.fullscreen .controls,.fullscreen .note { display:none; }
+  .fullscreen .window { height:100vh; border-radius:0; border:0; }
+  .session-menu { position:absolute; z-index:2; top:120px; left:50px; width:230px; background:var(--bar); padding:8px; border:1px solid var(--line); border-radius:7px; box-shadow:0 12px 32px #0005; }
+  .session-menu button { display:block; width:100%; text-align:left; border:0; background:none; padding:10px; border-radius:4px; }
+  .session-menu button:hover { background:#ffffff09; }
+  [hidden] { display:none!important; }
+  @media(max-width:850px) { .study { padding:16px; } .tools .clock { display:none; } .tab { min-width:100px; padding:0 10px; } .tab .close { padding-left:5px; } .session { padding:0 12px; } .terminal { font-size:10px; padding:12px; } }
+</style>
+<link rel="stylesheet" href="refinements.css">
+<link rel="stylesheet" href="activity.css">
+<link rel="stylesheet" href="vertical.css">
+<body class="tabs-reference">
+<main class="study">
+  <header class="intro"><div><h1>A quieter workspace.</h1><p>Ghostty UI study · compact tabs, clearer state, quieter interactions</p></div><span class="tag">Draft 02 / finishing touches</span></header>
+  <section class="window" aria-label="Interactive Ghostty mockup">
+    <div class="topbar">
+      <button class="session" aria-expanded="false" title="Sessions · hamlet · unsaved"><span class="ghost">♧</span><span id="session-name">hamlet</span><span class="session-state" title="Unsaved session"></span><span class="chevron">⌄</span></button>
+      <div class="tab-navigation">
+        <button class="strip-button scroll-button" id="scroll-left" aria-label="Scroll tabs left" hidden>‹</button>
+        <div class="tab-viewport">
+          <div class="tabs" role="tablist" aria-label="Terminal tabs"></div>
+          <div class="drop-marker" hidden></div>
+        </div>
+        <button class="strip-button scroll-button" id="scroll-right" aria-label="Scroll tabs right" hidden>›</button>
+        <button class="strip-button" id="add-tab" aria-label="New tab" title="New tab">+</button>
+        <button class="strip-button" id="find-tab" aria-label="Find a tab" title="Find a tab" aria-expanded="false">⌄</button>
+      </div>
+      <div class="tools"><span class="lua-status" title="Illustrative Lua status">01:18 · CPU 2% · RAM 31%</span><button class="tool" id="zen" title="Fullscreen draft (Escape to leave)" aria-label="Fullscreen draft">⛶</button></div>
+    </div>
+    <div class="workspace">
+      <section class="pane" tabindex="0" aria-label="Shell pane">
+        <div class="pane-header"><span class="focus-dot"></span><span class="path">~/dev/projects/ghostty</span><button title="Close button preview" aria-label="Close shell pane preview">×</button></div>
+        <div class="terminal"><p><span class="blue">01:18</span> <span class="dim">—</span> <span class="green">ghostty</span> <span class="dim">— ghostty-env</span></p><p class="content"><span class="blue">❯</span> jj status
+<span class="dim">Working copy changes:</span>
+<span class="yellow">M src/apprt/gtk/css/style.css</span>
+<span class="dim">Working copy (@):</span> vyuuvvwy <span class="blue">98af27a2</span>
+
+<span class="blue">❯</span> </p><div class="prompt"><span class="blue">❯</span><span class="cursor"></span></div></div>
+      </section>
+      <div class="right">
+        <section class="pane active" tabindex="0" aria-label="Editor pane">
+          <div class="pane-header"><span class="focus-dot"></span><span class="path">hx · src/apprt/gtk/css/style.css</span><button title="Close button preview" aria-label="Close editor pane preview">×</button></div>
+          <div class="terminal"><div class="content"><p class="dim">/* Give the content room to breathe. */</p><div class="editor-line"><span class="number">1</span><span class="yellow">.pane-header</span> {</div><div class="editor-line"><span class="number">2</span>  <span class="blue">background</span>: var(--header);</div><div class="editor-line"><span class="number">3</span>  <span class="blue">height</span>: <span class="green">30px</span>;</div><div class="editor-line"><span class="number">4</span>  <span class="blue">color</span>: var(--muted);</div><div class="editor-line"><span class="number">5</span>}</div><div class="editor-line"><span class="number">6</span></div><div class="editor-line"><span class="number">7</span><span class="cursor"></span></div></div></div>
+        </section>
+        <div class="bottom">
+          <section class="pane" tabindex="0" aria-label="Build pane"><div class="pane-header"><span class="focus-dot"></span><span class="path">build · ghostty</span><button title="Close button preview" aria-label="Close build pane preview">×</button></div><div class="terminal"><div class="content"><p><span class="blue">❯</span> zig build</p><p class="dim">Build Summary: 42/42 steps succeeded</p><p class="green">Done in 8.4s</p><p> </p></div><div class="prompt"><span class="blue">❯</span><span class="cursor"></span></div></div></section>
+          <section class="pane" tabindex="0" aria-label="Scratch pane"><div class="pane-header"><span class="focus-dot"></span><span class="path">~/dev/projects/ghostty</span><button title="Close button preview" aria-label="Close scratch pane preview">×</button></div><div class="terminal"><div class="prompt"><span class="blue">❯</span><span class="cursor"></span></div></div></section>
+        </div>
+      </div>
+    </div>
+  </section>
+  <div class="session-menu" role="dialog" aria-label="Sessions" hidden>
+    <div class="popover-heading">Sessions <span id="saved-label">Unsaved</span></div>
+    <div id="session-options"></div>
+    <div class="session-actions"><button id="save-session">Save this session</button></div>
+  </div>
+  <div class="tab-picker" role="dialog" aria-label="Find a tab" hidden>
+    <input id="tab-search" type="search" placeholder="Find a tab…" aria-label="Search tabs" autocomplete="off">
+    <div id="tab-results"></div>
+    <div class="picker-footer">↑ ↓ to navigate <span>Enter to switch</span></div>
+  </div>
+  <div class="tab-preview" role="tooltip" id="tab-preview" hidden><strong></strong><code></code><span></span></div>
+  <div class="draft-toast" role="status" hidden><span></span><button id="undo-close">Undo</button></div>
+  <form class="controls" onsubmit="return false">
+    <label>Tab style <select id="tab-style"><option value="reference">Reference · compact labels</option><option value="underline">Underline</option><option value="raised">Soft raised</option><option value="text">Text strip</option></select></label>
+    <label>Palette <select id="palette"><option value="kanagawa">Kanagawa Wave</option><option value="reference">Ink & sage</option><option value="neutral">Graphite</option><option value="warm">Warm charcoal</option><option value="blue">Deep blue</option></select></label>
+    <label>Focus tint <input id="tint" type="range" min="0" max="20" value="3"><output id="tint-value">3%</output></label>
+    <label>Inactive tabs <select id="inactive-tabs"><option value="0">Transparent</option><option value="4" selected>Faint background</option><option value="7">Stronger background</option></select></label>
+    <label><input id="headers" type="checkbox" checked>Pane headers</label>
+    <label><input id="content" type="checkbox" checked>Sample content</label>
+    <label><input id="overflow-demo" type="checkbox">Overflow example</label>
+    <label><input id="attention-demo" type="checkbox">Attention example</label>
+    <button type="button" id="replay-attention">Replay attention</button>
+    <button type="button" id="reset-tabs">Reset tabs</button>
+  </form>
+  <p class="note">Drag tabs to reorder. Hover for details. Close and undo, add tabs, or find a tab from ⌄. Try the overflow example. Session saving is simulated locally; terminal panes are illustrative. ⛶ hides the study controls.</p>
+</main>
+<script>
+  const $ = s => document.querySelector(s);
+  document.documentElement.style.setProperty('--tint', '3%');
+  $('#tab-style').addEventListener('change', e => { document.body.classList.remove('tabs-raised','tabs-text','tabs-reference'); if(e.target.value !== 'underline') document.body.classList.add('tabs-'+e.target.value); });
+  document.querySelectorAll('.pane').forEach(pane => {
+    const focus = () => {
+      document.querySelectorAll('.pane').forEach(p => p.classList.toggle('active', p === pane));
+    };
+    pane.addEventListener('pointerdown', focus);
+    pane.addEventListener('focusin', focus);
+  });
+  $('#tint').addEventListener('input', e => { document.documentElement.style.setProperty('--tint', e.target.value + '%'); $('#tint-value').value = e.target.value + '%'; });
+  $('#inactive-tabs').addEventListener('change', e => document.documentElement.style.setProperty('--inactive-tint', e.target.value + '%'));
+  $('#headers').addEventListener('change', e => document.body.classList.toggle('no-headers', !e.target.checked));
+  $('#content').addEventListener('change', e => document.body.classList.toggle('empty', !e.target.checked));
+  const palettes = {
+    // Installed Ghostty theme: background/foreground and palette[12] accent.
+    kanagawa:['#1f1f28','color-mix(in srgb, #dcd7ba 5%, #1f1f28)','color-mix(in srgb, #dcd7ba 2%, #1f1f28)','color-mix(in srgb, #dcd7ba 12%, #1f1f28)','#dcd7ba','color-mix(in srgb, #dcd7ba 65%, #1f1f28)','#7fb4ca'],
+    reference:['#101311','#171b18','#141815','#2a302c','#cbd0cb','#808b83','#90aa9a'],
+    neutral:['#1e1f27','#252630','#22232c','#30323d','#c5c6cd','#797d8d','#8fa7bd'],
+    warm:['#232220','#2c2a27','#282623','#393630','#ccc5b9','#898276','#b9a486'],
+    blue:['#1b202b','#232a37','#1f2632','#303a4a','#c1cbd9','#7b8aa0','#8daacb']
+  };
+  $('#palette').addEventListener('change', e => {
+    const style = document.documentElement.style;
+    ['bg','bar','header','line','text','muted','accent'].forEach((key,i) => style.setProperty('--'+key, palettes[e.target.value][i]));
+    const terminal = e.target.value === 'kanagawa' ? ['#727169','#76946a','#7e9cd8','#c0a36e'] : [];
+    ['muted','green','blue','yellow'].forEach((key,i) => { if (terminal[i]) style.setProperty('--term-'+key, terminal[i]); else style.removeProperty('--term-'+key); });
+  });
+  $('#palette').dispatchEvent(new Event('change'));
+  $('#zen').addEventListener('click', () => document.body.classList.toggle('fullscreen'));
+</script>
+<script src="refinements.js"></script>
+<script src="activity.js"></script>
+<script src="vertical.js"></script>
+</html>

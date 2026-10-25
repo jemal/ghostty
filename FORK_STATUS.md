@@ -1,11 +1,190 @@
 # Ghostty fork: status and roadmap
 
-Updated: 2026-10-24
+Updated: 2026-10-25
 
 This document records the work completed across the development chats, the current feature boundaries, and the ideas discussed for future work. It describes this fork's GTK/Linux implementation. It does not imply equivalent support in the macOS application.
 
 ## Current checkpoint
 
+- Review before commit on 2026-10-25 corrected immediate Enter/Down handling in
+  the tab picker: results are refreshed synchronously instead of relying on
+  the delayed search notification. Long picker labels are bounded, and pinned
+  attention tabs keep their disabled close glyph hidden on hover/focus.
+  Debug build, config validation, three focused layout tests, GTK CSS parsing,
+  draft JavaScript syntax and diff whitespace checks passed. A real-widget
+  regression verified search text followed immediately by Enter, overflow,
+  stable tab width, finite pulse, settled marker and reduced-motion fallback.
+  The installed ReleaseFast copy predates these review fixes. Stopped HTML
+  experiments are retained as exploration notes, not approved GTK scope.
+
+
+- The user stopped the activity/vertical-tab studies on 2026-10-25 because the
+  results were not preferred. Those experiments remain HTML-only and are not
+  approved for GTK. The user subsequently requested installation of the latest
+  approved horizontal GTK implementation. Installed ReleaseFast with system
+  Fontconfig to `~/.local` on 2026-10-25. The installed executable reports
+  `1.3.2-HEAD+03a41a64d`, confirms `.fast` build mode and passed
+  `+validate-config`. Running sessions were not restarted. The activity monitor
+  and vertical tabs are not part of this build.
+
+
+- Vertical draft simplification on 2026-10-25: the expanded inline activity
+  hierarchy was rejected as too busy. The rail now contains only tab names and
+  small status icons; task descriptions are available on hover or in the
+  Activity panel. Inline task rows/progress and footer counts were removed.
+  Browser checks and visual inspection passed; pane geometry is unchanged.
+  This is HTML-only and awaiting feedback, with no compilation or installation.
+
+
+- Vertical activity comparison on 2026-10-25: at the user's request, the HTML
+  draft now defaults to a collapsible left tab rail with the session control
+  above it and inline activity under selected or attention-needed tabs.
+  A layout selector restores horizontal tabs; All activity opens the detailed
+  panel. Browser interaction/layout checks passed and the screenshot was
+  visually inspected. Pane gaps and rounding are preserved. Await design
+  feedback before GTK implementation; installation remains cancelled.
+
+
+- Activity monitor study on 2026-10-25: installation was cancelled at the
+  user's request; the previous installed executable is unchanged. The local
+  HTML now includes a current-window Activity panel with grouped sample tasks,
+  filtering, optional idle panes, tab/pane navigation, explicit progress and
+  state-transition controls connected to the approved attention treatment.
+  It overlays the workspace without changing pane gaps or rounding. This is
+  a draft awaiting feedback, not live process monitoring. See
+  `src/apprt/gtk/ACTIVITY_MONITOR_PLAN.md` for the proposed application data path
+  and validation scope. No activity GTK/backend changes or builds were made.
+
+
+- Approved finishing draft port on 2026-10-25: the user approved the HTML and
+  authorized GTK implementation. Compact tabs now expose overflow arrows and
+  a searchable list of real pages (case-insensitive search, Enter selection,
+  Down to results, Escape dismissal). Hover details use the existing escaped
+  title/path with a live pane count. New attention runs a finite 1.2-second
+  pulse, then retains a dot in the close-control slot; hover reveals close,
+  selection clears attention, and disabled GTK animations skip the pulse.
+  Page references and timer/signal cleanup follow tab/window lifetimes.
+  Existing add/close/drag/session actions remain connected to their original
+  models; draft undo/session demonstrations do not add restoration semantics.
+  Pane gaps and rounding are unchanged. Debug build, GTK CSS parsing and all
+  three focused layout tests passed. An isolated real-widget check with 19
+  terminal tabs passed overflow scrolling, picker filtering/selection, finite
+  pulse, settled marker, fixed tab width and disabled-animation fallback.
+  Compact and native windows closed cleanly. Deferred overflow visibility
+  updates avoid invalidating GTK measurement during allocation. A nonfatal
+  AdwToolbarView startup allocation warning was observed in both modes; no GTK
+  critical errors remained. The user approved the GTK preview and authorized
+  installation on 2026-10-25, then cancelled the ReleaseFast build before it
+  installed. The installed executable remains unchanged. Work moved to the
+  activity-monitor HTML draft; activity process detection is not implemented.
+
+
+- Attention draft iteration on 2026-10-25: the user rejected a persistent tint,
+  underline and accent border. The current HTML candidate uses two soft pulses
+  over 1.2 seconds, then a quiet dot in the reserved close-control space. Hover
+  reveals the close control; selecting clears attention. Tab geometry stays
+  fixed. Reduced motion skips the pulse. A Replay attention control supports
+  comparison. Browser checks passed finite pulse, stable width, settled marker,
+  selection clearing and reduced-motion fallback. The user subsequently approved
+  this candidate for GTK (see above) and identified activity support as the next
+  major task and wants this attention treatment to fit that future work.
+
+- HTML finishing study on 2026-10-25: following positive desktop feedback on
+  the custom tab strip, the user requested further improvements ("go wild").
+  Draft 02 in `design/ui-draft/` adds overflow arrows/fades, a searchable tab
+  list, delayed full-title/path details, drag insertion markers, add/close/undo
+  interactions and saved/unsaved session state. Overflow and attention examples
+  can be toggled. Pane margins and rounding are untouched. The draft's session
+  saving and undo behavior are demonstrations, not new GTK capabilities.
+  Isolated browser checks passed close/undo, add/delete, attention, overflow,
+  search, synthetic drag reorder, session state, hover details and a 420 px
+  layout; screenshots were visually inspected. This study was subsequently
+  approved for GTK, per `AGENTS.md`. The previously
+  built custom strip has positive visual feedback but is not installed.
+
+- Resumed and validated on 2026-10-25: custom compact tabs and the persistent
+  session name are ready for desktop comparison, NOT installed or approved yet.
+  Final Debug build with system Fontconfig passed. Direct rectangle fields
+  removed the accidental Graphene getter dependency; the preview starts without
+  a Nix-shell library override. Expanded an unsupported `:is()` CSS selector;
+  GTK CSS parsing now passes. Isolated normal-desktop startup checks in both
+  compact and native modes passed tab creation, selection, reorder actions,
+  transfer-to-new-window actions and cleanup, with no GTK criticals or parser
+  errors. Three standalone drop-layout tests, formatting, configuration and
+  whitespace checks pass. Mouse DnD, close confirmation, overflow behavior,
+  context menus and live native/compact switching still need desktop testing.
+  Temporary check scripts/logs are in `/tmp/ghostty-tab-strip-smoke` and
+  `/tmp/ghostty-css-check.py`. Preview: `./zig-out/bin/ghostty` (Debug).
+  Installed daily-use binary remains the earlier approved styling pass.
+  No running user sessions were restarted. Prefer HTML-first design, Debug
+  iteration and ReleaseFast only for final validation/install.
+
+- Custom compact-tab strip and persistent session name on 2026-10-25: the user
+  requested both in one implementation pass using the approved HTML reference.
+  Compact mode now presents content-sized, capped/ellipsized tabs with 4 px gaps,
+  horizontal scrolling and a persistent session name. Native mode keeps AdwTabBar.
+  Both share AdwTabView for selection, process ownership, confirmation, page order
+  and transfers. The new strip implements close/middle-click, tab context menus,
+  keyboard navigation, drag reordering, transfers between compact strips and
+  drag-out windows; mixed native/compact drag protocols are not integrated.
+  Selection/attention/title updates preserve chip widgets. Page signal cleanup,
+  drag-owned references and menu-context cleanup are explicit. Existing toolbar
+  visibility rules, tab-bar location, pane gaps and rounding remain.
+  The idle-collapse timer, revealer and related hover/dialog hooks are removed.
+  Semantic checking and three standalone drop-layout tests passed. Final Debug
+  build and startup checks passed as recorded above. Desktop approval remains
+  pending; not installed.
+
+- Desktop-approved and installed on 2026-10-25: the user approved the final
+  compact-tab/pane-header readability pass. Installed to `~/.local` with
+  ReleaseFast and system Fontconfig; installed configuration validation passed.
+  Final sizes are 15 px tabs/session, 14 px pane titles and 13 px status, with
+  native tab spacing and no added side margins. Fixed pane-title weight,
+  reserved focus dots and faint inactive-tab backgrounds are included. Pane
+  gaps and rounding are unchanged. Running sessions were not restarted.
+  Native uniform tab widths remain a documented difference from the HTML draft.
+
+- Running-app readability correction on 2026-10-25: the user found the previous
+  sizes still too small. HTML and GTK now use 15 px tabs/session, 14 px pane
+  titles and 13 px status. Removed the extra 3 px margins on each side of every
+  GTK tab to avoid adding them to libadwaita's native spacing. Pane geometry
+  and fixed title weight are unchanged. GTK ReleaseFast build with system
+  Fontconfig, configuration validation, whitespace and draft JavaScript checks
+  passed. Desktop approval pending; not installed.
+
+- Readability follow-up on 2026-10-25: pane titles increase to 12 px and tabs
+  to 13 px in HTML and GTK. The user confirmed focus no longer moves pane titles.
+  Bar height, pane gaps and rounding stay unchanged. Investigation of libadwaita
+  1.8.1 `adw-tab.c` and `adw-tab-box.c` found native uniform tab sizing even when
+  expansion is disabled. Earlier content-width claims describe the HTML target,
+  not exact GTK behavior; true per-title sizing remains unimplemented and needs
+  a separate tab-strip solution. GTK ReleaseFast build with system Fontconfig,
+  configuration validation, Zig formatting, draft JavaScript syntax and
+  whitespace checks passed. Desktop approval pending; not installed.
+
+- Draft parity follow-up on 2026-10-25: inactive compact tabs gain the draft's
+  faint 4% foreground background; tab titles retain a fixed normal weight.
+  Tiled/stacked/floating pane titles retain a fixed medium weight on focus,
+  with reserved 5 px focus dots and subdued inactive titles. UI text sizes
+  follow the draft (12 px tabs/session, 11 px pane headers/status), along
+  with header insets and reserved close-icon geometry. The user rebuilt their
+  Nix configuration; the active Ghostty config now uses IBM Plex Sans, matching
+  the draft. Final GTK ReleaseFast build with system Fontconfig, configuration
+  validation, Zig formatting and whitespace checks passed. GTK desktop
+  validation of this follow-up is pending; not installed.
+
+- HTML-approved UI direction on 2026-10-25: compact content-width tabs with
+  small rounded labels, subtle accent selection outlines, a session control
+  on the left and Lua status on the right of the top bar. No bottom bar.
+  Quieter pane headers use a 3% accent tint for focus; pane gaps, margins,
+  rounding and neutral frame borders retain their previous values. GTK
+  implementation passed the GTK ReleaseFast build with system Fontconfig,
+  configuration validation, Zig formatting and whitespace checks. GTK desktop
+  approval is pending; not installed.
+  `design/ui-draft/index.html` is the interactive reference. Future UI changes
+  should be drafted in HTML for user feedback before GTK implementation
+  (also recorded in `AGENTS.md`). Colors continue to follow the user's theme;
+  the draft's Ink & sage palette is illustrative.
 - Stack desktop follow-up on 2026-10-24: the user found that Shift alone exits
   Alt+P mode. The one-shot table's catch-all matched bare modifiers and consumed
   the table. Modifier-only catch-all matches are now skipped for the active
@@ -802,7 +981,7 @@ upstream; `main` tracks `main@origin`. Never push `folie` to `origin`.
 ## Related implementation documentation
 
 - `src/apprt/gtk/UI_REFINEMENT_PLAN.md`: completed UI scope, Rex/Den UI
-  inspiration, tiled-pane framing, session-name collapse, animations and
+  inspiration, tiled-pane framing, persistent session names, animations and
   contrast evaluation, implementation and validation status.
 - `src/apprt/gtk/SESSION_RESTORE.md`: configuration, session semantics, storage, snapshots, pane actions, and validation.
 - `src/apprt/gtk/PICKER_IPC.md`: request/response schema, endpoint targeting, lifecycle, limits, D-Bus methods, and Nushell usage.

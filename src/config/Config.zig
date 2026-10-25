@@ -3852,10 +3852,10 @@ else
 @"gtk-tabs-inverted": bool = false,
 
 /// The appearance of the GTK tab bar. `native` uses the desktop's standard
-/// tabs. `compact` uses rounded tabs with a subtle selected background and a
-/// matching named-session selector.
+/// tabs. `compact` uses content-sized rounded tabs with a subtle selected
+/// background and a matching named-session selector.
 ///
-/// Compact tabs respect `gtk-wide-tabs` and work at either tab-bar location.
+/// Compact tabs use a custom scrolling strip and work at either tab-bar location.
 /// This does not change titlebar or tab-bar visibility. Use
 /// `gtk-titlebar-style = tabs` to place window controls alongside the tabs.
 /// Changes take effect when the configuration is reloaded. GTK only.
@@ -3946,7 +3946,7 @@ else
 /// are the new typical Gnome style where tabs fill their available space.
 /// If you set this to `false` then tabs will only take up space they need,
 /// which is the old style.
-/// This also applies to compact `gtk-tabs-style`.
+/// Compact `gtk-tabs-style` always disables wide expansion.
 @"gtk-wide-tabs": bool = true,
 
 /// If `true` (default), then two-finger horizontal scrolling on a touchpad
