@@ -362,6 +362,9 @@ pub const Window = extern struct {
         compact_tab_scroll: *gtk.ScrolledWindow,
         compact_tab_box: *gtk.Box,
         compact_strip: CompactTabStrip.State = .{},
+        side_tab_scroll: *gtk.ScrolledWindow,
+        side_tab_box: *gtk.Box,
+        side_strip: CompactTabStrip.State = .{},
         tab_view: *adw.TabView,
         toolbar: *adw.ToolbarView,
         toast_overlay: *adw.ToastOverlay,
@@ -403,7 +406,8 @@ pub const Window = extern struct {
         // If our configuration is null then we get the configuration
         // from the application.
         const priv = self.private();
-        priv.compact_strip.init(priv.tab_view, priv.compact_tab_box, priv.compact_tab_scroll);
+        priv.compact_strip.init(priv.tab_view, priv.compact_tab_box, priv.compact_tab_scroll, false);
+        priv.side_strip.init(priv.tab_view, priv.side_tab_box, priv.side_tab_scroll, true);
         priv.theme_overlay = gtk.Overlay.new();
         // The whole tab content hosts the picker, rather than a single pane.
         _ = priv.tab_view.as(gobject.Object).ref();
@@ -437,7 +441,6 @@ pub const Window = extern struct {
         // Set our window icon. We can't set this in the blueprint file
         // because its dependent on the build config.
         self.as(gtk.Window).setIconName(build_config.bundle_id);
-        priv.session_icon.setFromIconName(build_config.bundle_id);
         // Initialize our actions
         self.initActionMap();
 
@@ -606,8 +609,32 @@ pub const Window = extern struct {
             "tooltip",
             .{ .sync_create = true },
         );
+        // The page keyword is also what the tab overview searches.
+        _ = tab.as(gobject.Object).bindProperty(
+            "program-name",
+            page.as(gobject.Object),
+            "keyword",
+            .{ .sync_create = true },
+        );
+        _ = tab.as(gobject.Object).bindPropertyFull(
+            "icon-name",
+            page.as(gobject.Object),
+            "icon",
+            .{ .sync_create = true },
+            &iconFromName,
+            null,
+            null,
+            null,
+        );
 
         return page;
+    }
+
+    /// Converts the tab's icon name to the page's icon.
+    fn iconFromName(_: *gobject.Binding, from: *const gobject.Value, to: *gobject.Value, _: ?*anyopaque) callconv(.c) c_int {
+        const name = from.getString() orelse return 0;
+        to.takeObject(gio.ThemedIcon.new(name).as(gobject.Object));
+        return 1;
     }
 
     pub const SelectTab = union(enum) {
@@ -880,6 +907,8 @@ pub const Window = extern struct {
         priv.compact_tab_scroll.as(gtk.Widget).setVisible(@intFromBool(compact));
         priv.compact_strip.configure(config.@"gtk-tabs-inverted");
         priv.compact_strip.setVisible(compact);
+        priv.side_strip.configure(config.@"gtk-tabs-inverted");
+        self.toggleCssClass("tabs-left", config.@"gtk-tabs-location" == .left);
         if (compact) {
             priv.tab_strip_header.as(gtk.Widget).addCssClass("compact-tabs");
         } else {
@@ -895,11 +924,16 @@ pub const Window = extern struct {
         );
 
         // Move the tab bar to the proper location.
-        priv.toolbar.remove(priv.tab_strip_handle.as(gtk.Widget));
+        // With the tabs at the left, the strip is in no toolbar.
+        if (ext.getAncestor(adw.ToolbarView, priv.tab_strip_handle.as(gtk.Widget)) != null)
+            priv.toolbar.remove(priv.tab_strip_handle.as(gtk.Widget));
         switch (config.@"gtk-tabs-location") {
             .top => priv.toolbar.addTopBar(priv.tab_strip_handle.as(gtk.Widget)),
             .bottom => priv.toolbar.addBottomBar(priv.tab_strip_handle.as(gtk.Widget)),
+            // The side panel shows the tabs instead.
+            .left => {},
         }
+        self.refreshPaneDecorations();
 
         // Do our window-protocol specific appearance sync.
         priv.winproto.syncAppearance() catch |err| {
@@ -2114,6 +2148,22 @@ pub const Window = extern struct {
         return @intFromBool(style == .tabs and compact == 0);
     }
 
+    fn closureSidePanelVisible(_: *Self, config_: ?*Config, toolbar_visible: c_int) callconv(.c) c_int {
+        const config = if (config_) |v| v.get() else return 0;
+        return @intFromBool(config.@"gtk-tabs-location" == .left and toolbar_visible != 0);
+    }
+
+    /// True when the side tab list is hidden, so that the first pane's header
+    /// shows the button that brings it back.
+    pub fn sideTabsHidden(self: *Self) bool {
+        const config = self.private().config orelse return false;
+        return config.get().@"gtk-tabs-location" == .left and !self.getToolbarVisible();
+    }
+
+    fn notifyToolbarVisible(_: *adw.ApplicationWindow, _: *gobject.ParamSpec, self: *Self) callconv(.c) void {
+        self.refreshPaneDecorations();
+    }
+
     fn closureTabStripVisible(_: *Self, visible: c_int, autohide: c_int, count: c_int) callconv(.c) c_int {
         return @intFromBool(visible != 0 and (autohide == 0 or count > 1));
     }
@@ -2196,6 +2246,7 @@ pub const Window = extern struct {
     fn dispose(self: *Self) callconv(.c) void {
         const priv = self.private();
         priv.compact_strip.deinit();
+        priv.side_strip.deinit();
         priv.theme.deinit(self);
         if (priv.handle_active_state_source) |v| {
             if (glib.Source.remove(v) == 0) {
@@ -3195,6 +3246,8 @@ pub const Window = extern struct {
             class.bindTemplateChildPrivate("tab_strip_handle", .{});
             class.bindTemplateChildPrivate("compact_tab_scroll", .{});
             class.bindTemplateChildPrivate("compact_tab_box", .{});
+            class.bindTemplateChildPrivate("side_tab_scroll", .{});
+            class.bindTemplateChildPrivate("side_tab_box", .{});
             class.bindTemplateChildPrivate("tab_view", .{});
             class.bindTemplateChildPrivate("toolbar", .{});
             class.bindTemplateChildPrivate("toast_overlay", .{});
@@ -3227,6 +3280,8 @@ pub const Window = extern struct {
             class.bindTemplateCallback("titlebar_style_is_tabs", &closureTitlebarStyleIsTab);
             class.bindTemplateCallback("native_tab_controls", &closureNativeTabControls);
             class.bindTemplateCallback("tab_strip_visible", &closureTabStripVisible);
+            class.bindTemplateCallback("side_panel_visible", &closureSidePanelVisible);
+            class.bindTemplateCallback("notify_toolbar_visible", &notifyToolbarVisible);
             class.bindTemplateCallback("session_name_width", &closureSessionNameWidth);
             class.bindTemplateCallback("computed_title", &closureTitle);
             class.bindTemplateCallback("computed_subtitle", &closureSubtitle);

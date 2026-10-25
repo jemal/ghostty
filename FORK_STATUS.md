@@ -6,6 +6,55 @@ This document records the work completed across the development chats, the curre
 
 ## Current checkpoint
 
+- Rex-style UI, first GTK pass on 2026-10-25 (Debug, not desktop-tested, not
+  installed or committed). The user approved `design/ui-draft/rex.html`, which
+  replaces the earlier activity/vertical studies. This pass changes the top-bar
+  mode only: decorated panes are cards with 10 px gaps and 12 px corners on a
+  darker window background (`--ghostty-shell-bg`); focus is shown only by
+  dimming other panes (header text at 55%; terminal dimming uses the existing
+  `unfocused-split-opacity`, which the user wants at 0.55); pane headers show a
+  program icon and faint split-right/split-down/zoom/close buttons; compact
+  tabs are pills in one track with a program tile; compact mode adds command
+  palette and new-tab buttons; the command palette is narrower with one-line
+  rows. Icons exist for Helix, Codex and Claude only; every other program uses
+  the terminal icon. A per-surface 1.5 s timer reads the foreground executable
+  (`program_icon.zig`). Next: vertical tab mode (`gtk-tabs-layout`), with
+  Ctrl+Shift+B (`toggle_toolbar`) showing or hiding the side list. Debug build,
+  Zig formatting, the program-icon test and GTK 4.22 CSS parsing passed.
+  Follow-up after X11 sandbox screenshots: inactive tabs hide their close
+  button (space kept), "Find a tab" shows only when tabs overflow, the
+  palette has no close button and shows shortcuts as plain text. The theme
+  CSS `:is(.native-picker, .floating-terminal)` rule was removed: GTK never
+  parsed it ("Unknown pseudoclass"), so the approved look did not use it.
+  Later the same day: pane headers are the drag handle for moving panes (the
+  surface drag handle is hidden while headers show), the tab track is
+  vertically centred, the session control has an outline icon with
+  "unsaved" below the name, tabs have dividers and no gaps, and tabs and pane
+  headers show the foreground executable name in bold before the title
+  (not repeated when the title starts with it). Tab pages carry the name as
+  their keyword. 101 focused program tests passed; checked in the X11 sandbox.
+- Vertical tabs on 2026-10-25 (Debug, not desktop-tested, not installed or
+  committed): `gtk-tabs-location = left` puts the tabs in a side column (a
+  second, vertical CompactTabStrip on the same AdwTabView) with sidebar,
+  command palette and new-tab buttons, the session name and the tab list. No
+  top bar is shown. The column follows toolbar visibility, so
+  `toggle_toolbar` (the user's Ctrl+Shift+B) and the session-aware autohide
+  show and hide it; while hidden, the first (top-left or zoomed) pane header
+  shows a sidebar button. Side tabs reorder by drag. Checked in the X11
+  sandbox: open, hidden, re-shown, drag reorder, and the top mode unchanged,
+  with no GTK criticals. Reference images are in
+  `design/ui-draft/rex-reference/`.
+  The side column first expanded to half the window (children with hexpand
+  propagate it); it now sets `hexpand: false`. At the user's request the
+  Rex-style UI and vertical tabs were installed with ReleaseFast and system
+  Fontconfig to `~/.local` on 2026-10-25 (`.fast`, `1.3.2-HEAD+23588e1c2`
+  plus the uncommitted working copy). Configuration validation passed,
+  including `gtk-tabs-location = left` and `unfocused-split-opacity = 0.55`.
+  Running sessions were not restarted. Committed in jj change `qzyxxpqy`.
+  Follow-up reinstall at 23:12: the first pane's sidebar button no longer
+  adds left margin, so its icon is 12 px from the left and top edges, like
+  other header icons (measured in the X11 sandbox).
+
 - Review before commit on 2026-10-25 corrected immediate Enter/Down handling in
   the tab picker: results are refreshed synchronously instead of relying on
   the delayed search notification. Long picker labels are bounded, and pinned
@@ -516,6 +565,10 @@ remains subject to continued use.
 
 ## UI validation preference: no X11 screenshot workflow
 
+**Update 2026-10-25:** the user allowed the isolated X11 screenshot sandbox
+again when it helps UI iteration. The user still does the final desktop test.
+The older rule below is kept for history.
+
 **Do not set up isolated X11/Xvfb desktop tests, capture screenshots, or run
 screenshot-viewing/visual QA loops for routine iteration.** The user explicitly
 stopped this workflow because it adds too much work and takes too long.
@@ -977,6 +1030,8 @@ upstream; `main` tracks `main@origin`. Never push `folie` to `origin`.
 | `ovytvymr` | gtk: refine pane and session chrome |
 | `klpmyuor` | gtk: add floating panel zoom |
 | `rnvumyqp` | gtk: add tiled pane stacks and focus history |
+| `vyuuvvwy` | gtk: add content-sized tabs and quiet attention |
+| `qzyxxpqy` | gtk: add Rex-style panes, program icons and vertical tabs |
 
 ## Related implementation documentation
 

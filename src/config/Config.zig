@@ -3835,7 +3835,13 @@ else
 @"gtk-titlebar": bool = true,
 
 /// Determines the side of the screen that the GTK tab bar will stick to.
-/// Top, bottom, and hidden are supported. The default is top.
+/// Top, bottom, left, and hidden are supported. The default is top.
+///
+/// `left` shows the tabs as a vertical list at the side of the window, with
+/// no tab bar at the top. The list uses the compact tab style. It follows the
+/// toolbar visibility: `toggle_toolbar` shows or hides it, and while it is
+/// hidden, the header of the first pane shows a button that brings it back
+/// (this needs `gtk-pane-decorations`).
 ///
 /// When `hidden` is set, a tab button displaying the number of tabs will appear
 /// in the title bar. It has the ability to open a tab overview for displaying
@@ -9522,6 +9528,7 @@ pub const GtkSingleInstance = enum {
 pub const GtkTabsLocation = enum {
     top,
     bottom,
+    left,
 };
 
 /// See gtk-tabs-style

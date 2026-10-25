@@ -3,7 +3,8 @@ using Gio 2.0;
 using Adw 1;
 
 Adw.Dialog dialog {
-  content-width: 700;
+  content-width: 460;
+  styles ["command-palette"]
   closed => $closed();
 
   Adw.ToolbarView {
@@ -11,6 +12,9 @@ Adw.Dialog dialog {
 
     [top]
     Adw.HeaderBar {
+      // Escape closes the palette; a close button only adds clutter.
+      show-end-title-buttons: false;
+      show-start-title-buttons: false;
       [title]
       Gtk.SearchEntry search {
         hexpand: true;
@@ -28,7 +32,7 @@ Adw.Dialog dialog {
       min-content-height: 300;
 
       Gtk.ListView view {
-        show-separators: true;
+        show-separators: false;
         single-click-activate: true;
         activate => $row_activated();
 
@@ -55,7 +59,7 @@ Adw.Dialog dialog {
         };
 
         styles [
-          "rich-list",
+          "navigation-sidebar",
           "command-palette-view",
         ]
 
@@ -66,36 +70,19 @@ Adw.Dialog dialog {
               spacing: 10;
               tooltip-text: bind template.item as <$GhosttyCommand>.description;
 
-              Gtk.Box {
-                orientation: vertical;
+              // The action key stays searchable; the row shows only the title.
+              Gtk.Label {
+                ellipsize: end;
+                halign: start;
                 hexpand: true;
+                wrap: false;
+                single-line-mode: true;
 
-                Gtk.Label {
-                  ellipsize: end;
-                  halign: start;
-                  wrap: false;
-                  single-line-mode: true;
+                styles [
+                  "title",
+                ]
 
-                  styles [
-                    "title",
-                  ]
-
-                  label: bind template.item as <$GhosttyCommand>.title;
-                }
-
-                Gtk.Label {
-                  ellipsize: end;
-                  halign: start;
-                  wrap: false;
-                  single-line-mode: true;
-
-                  styles [
-                    "subtitle",
-                    "monospace",
-                  ]
-
-                  label: bind template.item as <$GhosttyCommand>.action-key;
-                }
+                label: bind template.item as <$GhosttyCommand>.title;
               }
 
               Gtk.ShortcutLabel {

@@ -1,0 +1,431 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rex-style Ghostty</title>
+<style>
+  /* Rex dark is the default. Light and the user's theme (Kanagawa Wave) are below. */
+  :root {
+    color-scheme: dark;
+    --win:#0b0b0d; --pane:#141416; --pane-line:#ffffff10; --pane-shadow:none;
+    --track:#1a1a1d; --tab-sel:#29292d; --tab-sel-line:#ffffff17; --divider:#ffffff14;
+    --text:#e8e8ea; --muted:#8d8d93; --faint:#5c5c63; --accent:#e0a458;
+    --t-dim:#7f848e; --t-blue:#61afef; --t-green:#a8cc8c; --t-yellow:#e5c07b; --t-red:#e06c75; --t-cyan:#56b6c2; --t-sel:#1f3a4f;
+    --gap:10px; --radius:12px;
+  }
+  body.light {
+    color-scheme: light;
+    --win:#ebe6e8; --pane:#fbfaf7; --pane-line:#0000000a; --pane-shadow:0 1px 3px #0000000f, 0 4px 14px #00000008;
+    --track:#e0dbde; --tab-sel:#ffffff; --tab-sel-line:#00000012; --divider:#00000014;
+    --text:#1d1d1f; --muted:#6e6e73; --faint:#a1a1a6; --accent:#c9822b;
+    --t-dim:#8a8a8f; --t-blue:#2a6fdb; --t-green:#2e8b3a; --t-yellow:#a66f00; --t-red:#c8364b; --t-cyan:#1a8a99; --t-sel:#dbe8f7;
+  }
+  body.kanagawa {
+    --win:#16161d; --pane:#1f1f28; --pane-line:#dcd7ba12; --pane-shadow:none;
+    --track:#1a1a22; --tab-sel:#2a2a37; --tab-sel-line:#dcd7ba1a; --divider:#dcd7ba17;
+    --text:#dcd7ba; --muted:#8a8980; --faint:#54546d; --accent:#7fb4ca;
+    --t-dim:#727169; --t-blue:#7e9cd8; --t-green:#98bb6c; --t-yellow:#e6c384; --t-red:#e46876; --t-cyan:#7fb4ca; --t-sel:#2d4f67;
+  }
+  /* The values used by the current GTK build, for comparison. */
+  body.spacing-current { --gap:6px; --radius:8px; }
+
+  * { box-sizing:border-box; }
+  body { margin:0; background:#2a2a30; color:var(--text); font:14px "IBM Plex Sans", system-ui, sans-serif; }
+  body.light { background:#c9c3c8; }
+  button { font:inherit; color:inherit; background:none; border:0; padding:0; cursor:pointer; }
+  button:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; border-radius:6px; }
+  svg { width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round; flex:none; }
+
+  .study { padding:28px; max-width:1500px; margin:0 auto; }
+  .window { height:min(80vh, 920px); min-height:540px; background:var(--win); border-radius:14px; overflow:hidden; display:flex; flex-direction:column; box-shadow:0 30px 90px #0006; border:1px solid var(--pane-line); }
+
+  /* Top bar: session, tab track, tools. No borders; it is part of the window background. */
+  .bar { display:flex; align-items:center; gap:12px; height:46px; flex:none; padding:0 var(--gap) 0 14px; }
+  .session { display:flex; align-items:center; gap:9px; padding:4px 8px; border-radius:8px; min-width:0; }
+  .session:hover { background:var(--track); }
+  .session svg { width:18px; height:18px; color:var(--muted); }
+  .session-text { display:flex; flex-direction:column; line-height:1.15; text-align:left; }
+  .session-text b { font-weight:600; font-size:15px; white-space:nowrap; }
+  .session-text small { color:var(--muted); font-size:12px; }
+
+  .track { display:flex; align-items:center; height:34px; padding:3px; gap:0; background:var(--track); border-radius:11px; min-width:0; overflow:hidden; flex:0 1 auto; }
+  .tab { position:relative; display:flex; align-items:center; gap:8px; height:28px; flex:0 1 270px; min-width:110px; padding:0 8px 0 6px; border-radius:8px; border:1px solid transparent; color:var(--muted); font-size:15px; }
+  .tab::before { content:""; position:absolute; left:-1px; top:7px; bottom:7px; border-left:1px solid var(--divider); }
+  .tab:first-child::before, .tab.selected::before, .tab.selected + .tab::before { display:none; }
+  .tab:hover:not(.selected) { color:var(--text); }
+  .tab.selected { background:var(--tab-sel); border-color:var(--tab-sel-line); color:var(--text); box-shadow:0 1px 2px #0000001a; }
+  .label { flex:1; min-width:0; overflow:hidden; white-space:nowrap; text-align:left; -webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 28px),transparent); mask-image:linear-gradient(90deg,#000 calc(100% - 28px),transparent); }
+  .label b { font-weight:500; color:var(--text); }
+  .tab:not(.selected) .label b { color:inherit; }
+  .tab .end { width:16px; height:16px; display:grid; place-items:center; flex:none; }
+  .tab .close { display:none; color:var(--muted); font-size:15px; line-height:1; border-radius:4px; width:16px; height:16px; }
+  .tab .close:hover { background:var(--divider); color:var(--text); }
+  .tab:hover .close, .tab.selected .close { display:block; }
+  .tab .dot { width:6px; height:6px; border-radius:50%; background:var(--accent); }
+  .tab:hover .dot, .tab.selected .dot { display:none; }
+
+  /* App icon plus one small bar per pane: a small picture of the tab's layout. */
+  .app { display:flex; align-items:center; flex:none; }
+  .app-icon { width:20px; height:20px; border-radius:6px; display:grid; place-items:center; color:#fff; background:linear-gradient(160deg, color-mix(in srgb, var(--app) 80%, #fff), var(--app)); box-shadow:inset 0 0 0 1px #ffffff1f, 0 1px 2px #0003; }
+  .app-icon svg { width:13px; height:13px; stroke-width:1.8; }
+  .side-list .app-icon { width:22px; height:22px; }
+  .pane-icon { display:grid; place-items:center; color:var(--app); }
+  .pane-icon svg { width:15px; height:15px; stroke-width:1.7; }
+
+  .tools { display:flex; align-items:center; gap:6px; margin-left:auto; color:var(--muted); flex:none; }
+  .tools .status { font-size:13px; margin-right:8px; white-space:nowrap; }
+  .tools button { width:30px; height:30px; display:grid; place-items:center; border-radius:7px; }
+  .tools button:hover { background:var(--track); color:var(--text); }
+  .tools svg { width:18px; height:18px; }
+
+  /* Panes: rounded cards on the window background, with gaps between them. */
+  .workspace { flex:1; min-height:0; display:grid; grid-template-rows:2.1fr 1fr; gap:var(--gap); padding:0 var(--gap) var(--gap); }
+  .row { display:grid; gap:var(--gap); min-height:0; }
+  .row.top { grid-template-columns:1.65fr 1fr; } .row.bottom { grid-template-columns:1.1fr 1fr; }
+  .pane { position:relative; min-width:0; min-height:0; display:flex; flex-direction:column; background:var(--pane); border:1px solid var(--pane-line); border-radius:var(--radius); box-shadow:var(--pane-shadow); overflow:hidden; outline:none; }
+  /* Rex marks focus only by dimming the other panes. The pane background stays. */
+  body.focus-dim .pane:not(.active) .pane-head, body.focus-dim .pane:not(.active) .term { opacity:var(--dim, .55); transition:opacity .15s; }
+  .pane-head { display:flex; align-items:center; gap:8px; height:38px; flex:none; padding:0 10px 0 14px; color:var(--muted); font-size:14px; white-space:nowrap; }
+  .pane-head .title { min-width:0; overflow:hidden; text-overflow:ellipsis; }
+  .pane-head b { font-weight:600; color:var(--text); }
+  .pane-head .actions { display:flex; gap:2px; margin-left:auto; opacity:0; transition:opacity .12s; }
+  body.actions-faint .pane-head .actions { opacity:.5; }
+  .pane:hover .pane-head .actions { opacity:1; }
+
+  /* Hidden tabs: no top bar. The first pane header holds the sidebar and session buttons. */
+  .lead { display:none; align-items:center; gap:2px; margin-left:-6px; margin-right:4px; }
+  body.tabs-hidden:not(.side-open) .lead { display:flex; }
+  body.tabs-hidden .bar { display:none; }
+  body.tabs-hidden .workspace { padding-top:var(--gap); }
+  .lead button { width:26px; height:24px; display:grid; place-items:center; border-radius:6px; color:var(--muted); }
+  .lead button:hover, .lead button[aria-pressed="true"] { background:var(--divider); color:var(--text); }
+  .main { flex:1; min-height:0; display:flex; }
+  .main .workspace { flex:1; min-width:0; }
+  /* Side tabs: a plain list on the window background, with the window tools at the top. */
+  .side { display:none; width:270px; flex:none; flex-direction:column; padding:var(--gap) 0 var(--gap) var(--gap); }
+  body.tabs-hidden.side-open .side { display:flex; }
+  .side-head { display:flex; align-items:center; gap:2px; height:38px; padding:0 4px; color:var(--muted); }
+  .side-head .spacer { flex:1; }
+  .side-head button { width:28px; height:26px; display:grid; place-items:center; border-radius:6px; }
+  .side-head button:hover { background:var(--track); color:var(--text); }
+  .side-session { align-self:flex-start; margin:8px 0 6px; padding:2px 8px; border-radius:6px; color:var(--muted); font-size:13px; font-weight:500; }
+  .side-session:hover { color:var(--text); background:var(--track); }
+  .side-list { display:flex; flex-direction:column; gap:3px; }
+  .side-list .tab { flex:none; height:34px; min-width:0; padding:0 8px; border-radius:9px; }
+  .side-list .tab::before { display:none; }
+  .side-list .tab:hover:not(.selected) { background:var(--track); }
+  .side-list .label { font-size:14px; }
+  .pane-head .actions button { width:26px; height:24px; display:grid; place-items:center; border-radius:6px; color:var(--muted); }
+  .pane-head .actions button:hover { background:var(--divider); color:var(--text); }
+  .pane.zoomed { position:absolute; inset:0 var(--gap) var(--gap); z-index:3; }
+  .workspace { position:relative; }
+
+  .term { flex:1; min-height:0; overflow:hidden; padding:2px 14px 12px; font:13px/1.45 "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace; white-space:pre; }
+  .d { color:var(--t-dim); } .b { color:var(--t-blue); } .g { color:var(--t-green); } .y { color:var(--t-yellow); } .r { color:var(--t-red); } .c { color:var(--t-cyan); } .i { font-style:italic; }
+  .ln { display:inline-block; width:3ch; text-align:right; margin-right:2ch; color:var(--faint); }
+  .hl { background:var(--t-sel); display:block; margin:0 -14px; padding:0 14px; }
+  .cursor { display:inline-block; width:.6em; height:1.1em; vertical-align:text-bottom; border:1px solid var(--muted); }
+  .pane.active .cursor { background:var(--text); border-color:var(--text); }
+  .modeline { display:flex; gap:12px; margin:6px -14px 0; padding:0 14px; background:var(--t-sel); }
+  .modeline .mode { background:var(--t-blue); color:var(--pane); font-weight:700; padding:0 8px; margin-left:-14px; }
+
+  /* Command palette: a floating card over the workspace, with sections and keys at the right. */
+  .window { position:relative; }
+  .palette { position:absolute; z-index:10; top:70px; left:50%; transform:translateX(-50%); width:min(420px, calc(100% - 32px)); display:flex; flex-direction:column; background:color-mix(in srgb, var(--text) 5%, var(--pane)); border:1px solid var(--tab-sel-line); border-radius:12px; box-shadow:0 18px 50px #0007; overflow:hidden; }
+  body.light .palette { background:#fff; box-shadow:0 18px 50px #0002; }
+  .palette-search { display:flex; align-items:center; gap:8px; margin:8px; padding:0 10px; height:36px; border-radius:8px; background:var(--track); color:var(--muted); }
+  .palette-search input { flex:1; min-width:0; background:none; border:0; outline:none; color:var(--text); font:inherit; font-size:14px; }
+  .palette-list { max-height:420px; overflow:auto; padding:0 6px 6px; }
+  .palette-section { padding:10px 10px 4px; color:var(--muted); font-size:12px; font-weight:500; }
+  .palette-item { display:flex; align-items:center; gap:10px; width:100%; height:32px; padding:0 8px 0 10px; border-radius:7px; font-size:14px; text-align:left; }
+  .palette-item.selected { background:color-mix(in srgb, var(--accent) 38%, transparent); }
+  .palette-item kbd { margin-left:auto; color:var(--muted); font:12px "IBM Plex Sans", system-ui, sans-serif; }
+  .palette-item.selected kbd { color:var(--text); }
+  .palette-item .more { width:12px; color:var(--muted); }
+  .palette-item:not(:has(kbd)) .more { margin-left:auto; }
+  .palette-empty { padding:16px 10px; color:var(--muted); font-size:13px; }
+  .palette-foot { display:flex; justify-content:flex-end; gap:14px; padding:8px 12px; border-top:1px solid var(--divider); color:var(--muted); font-size:12px; }
+  .palette-foot kbd { margin-left:6px; padding:1px 5px; border:1px solid var(--divider); border-radius:4px; font:inherit; }
+
+  .controls { display:flex; flex-wrap:wrap; gap:20px; align-items:center; padding:18px 2px 6px; color:#c8c8cc; font-size:13px; }
+  body.light .controls, body.light .note { color:#3a3a3e; }
+  .controls label { display:flex; align-items:center; gap:8px; }
+  .controls select { background:#1d1d21; color:#e8e8ea; border:1px solid #3a3a40; border-radius:6px; padding:5px 8px; font:inherit; }
+  .note { color:#9a9aa0; font-size:12.5px; margin:4px 2px 0; max-width:900px; line-height:1.5; }
+  @media (max-width:860px) {
+    .study { padding:12px; } .tools .status, .session-text small { display:none; }
+    .row.top, .row.bottom { grid-template-columns:1fr; } .workspace { grid-template-rows:1fr 1fr; } .row.bottom .pane:last-child, .row.top .pane:last-child { display:none; }
+  }
+</style>
+<body class="focus-dim actions-faint tabs-hidden side-open">
+<main class="study">
+  <section class="window" aria-label="Rex-style Ghostty mock-up">
+    <header class="bar">
+      <button class="session" title="Sessions · hamlet · unsaved (opens the session overlay)">
+        <svg viewBox="0 0 16 16"><rect x="2.5" y="4.5" width="11" height="9" rx="2"/><path d="M4.5 2.5h7"/></svg>
+        <span class="session-text"><b id="session-name">hamlet</b><small>unsaved</small></span>
+      </button>
+      <div class="track" role="tablist" aria-label="Tabs"></div>
+      <div class="tools">
+        <span class="status" title="Lua status (ghostty.status)">01:18 · CPU 2%</span>
+        <button class="open-palette" title="Command palette" aria-label="Command palette"><svg viewBox="0 0 16 16"><path d="M6 6V4a2 2 0 1 0-2 2h8a2 2 0 1 0-2-2v8a2 2 0 1 0 2-2H4a2 2 0 1 0 2 2V6z"/></svg></button>
+        <button class="add-tab" title="New tab" aria-label="New tab"><svg viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></svg></button>
+      </div>
+    </header>
+    <div class="main">
+    <aside class="side" aria-label="Tabs">
+      <div class="side-head">
+        <button class="side-toggle" title="Hide tabs" aria-label="Hide tabs"><svg viewBox="0 0 16 16"><rect x="2.5" y="3" width="11" height="10" rx="1.5"/><path d="M6 3v10"/></svg></button>
+        <span class="spacer"></span>
+        <button class="open-palette" title="Command palette" aria-label="Command palette"><svg viewBox="0 0 16 16"><path d="M6 6V4a2 2 0 1 0-2 2h8a2 2 0 1 0-2-2v8a2 2 0 1 0 2-2H4a2 2 0 1 0 2 2V6z"/></svg></button>
+        <button class="add-tab" title="New tab" aria-label="New tab"><svg viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></svg></button>
+      </div>
+      <button class="side-session" title="Sessions · unsaved (opens the session overlay)">hamlet</button>
+      <div class="side-list" role="tablist" aria-label="Tabs"></div>
+    </aside>
+    <div class="workspace">
+      <div class="row top">
+        <section class="pane active" data-app="hx" tabindex="0">
+          <div class="pane-head"><span class="lead"><button class="side-toggle" title="Show tabs" aria-label="Show tabs"><svg viewBox="0 0 16 16"><rect x="2.5" y="3" width="11" height="10" rx="1.5"/><path d="M6 3v10"/></svg></button></span><svg viewBox="0 0 16 16"><path d="M3 4.5 6 7.5 3 10.5M8 11.5h5"/></svg><span class="title"><b>hx</b> ~/dev/projects/ghostty</span></div>
+          <div class="term"><span class="ln">212</span><span class="d i">// Pane headers follow the window font, not the terminal font.</span>
+<span class="ln">213</span><span class="b">.pane-header</span> {
+<span class="ln">214</span>  <span class="c">min-height</span>: <span class="y">38px</span>;
+<span class="ln">215</span>  <span class="c">padding</span>: <span class="y">0 10px 0 14px</span>;
+<span class="hl"><span class="ln">216</span>  <span class="c">border-radius</span>: <span class="y">12px 12px 0 0</span>;</span><span class="ln">217</span>  <span class="c">background</span>: <span class="g">transparent</span>;
+<span class="ln">218</span>}
+<span class="ln">219</span>
+<span class="ln">220</span><span class="b">.pane-header</span> <span class="b">.title</span> {
+<span class="ln">221</span>  <span class="c">font-weight</span>: <span class="y">600</span>;
+<span class="ln">222</span>  <span class="c">color</span>: <span class="r">@view_fg_color</span>;
+<span class="ln">223</span>}
+<span class="ln">224</span>
+<span class="ln">225</span><span class="b">.pane-header</span> <span class="b">.subtitle</span> {
+<span class="ln">226</span>  <span class="c">color</span>: <span class="r">alpha</span>(<span class="r">@view_fg_color</span>, <span class="y">0.55</span>);
+<span class="ln">227</span>}
+<span class="ln">228</span>
+<div class="modeline"><span class="mode">NOR</span><span>src/apprt/gtk/css/style.css</span><span class="d" style="margin-left:auto">css  216:3</span></div></div>
+        </section>
+        <section class="pane" data-app="claude" tabindex="0">
+          <div class="pane-head"><svg viewBox="0 0 16 16"><path d="M8 2.5v11M2.5 8h11M4.1 4.1l7.8 7.8M11.9 4.1l-7.8 7.8"/></svg><span class="title"><b>claude</b> ~/dev/projects/ghostty</span></div>
+          <div class="term"><span class="d">╭──────────────────────────────────────╮</span>
+<span class="d">│</span> <span class="y">✻</span> Welcome back                         <span class="d">│</span>
+<span class="d">╰──────────────────────────────────────╯</span>
+
+<span class="d">&gt;</span> make the pane headers look like Rex
+
+<span class="g">●</span> I will make a separate HTML draft
+  first, so that the approved draft
+  stays the same.
+
+<span class="g">●</span> <b>Write</b>(design/ui-draft/rex.html)
+  <span class="d">⎿  Wrote 214 lines</span>
+
+
+
+<span class="d">──────────────────────────────────────</span>
+<span class="d">&gt;</span> <span class="cursor"></span>
+<span class="d">──────────────────────────────────────</span>
+  <span class="d">? for shortcuts</span></div>
+        </section>
+      </div>
+      <div class="row bottom">
+        <section class="pane" data-app="zig" tabindex="0">
+          <div class="pane-head"><svg viewBox="0 0 16 16"><path d="M3 4.5 6 7.5 3 10.5M8 11.5h5"/></svg><span class="title"><b>zig</b> ~/dev/projects/ghostty</span></div>
+          <div class="term"><span class="b">❯</span> nix develop -c zig build
+<span class="d">install</span>
+<span class="d">└─ install ghostty</span>
+<span class="d">   └─ zig build-exe ghostty Debug native</span> <span class="g">success</span>
+Build Summary: <span class="g">42/42 steps succeeded</span>
+<span class="g">Done in 8.4s</span>
+<span class="b">❯</span> <span class="cursor"></span></div>
+        </section>
+        <section class="pane" data-app="nu" tabindex="0">
+          <div class="pane-head"><svg viewBox="0 0 16 16"><path d="M3 4.5 6 7.5 3 10.5M8 11.5h5"/></svg><span class="title"><b>nu</b> ~/dev/projects/ghostty</span></div>
+          <div class="term"><span class="b">ghostty</span> <span class="d">on</span> <span class="y">vyuuvvwy</span> <span class="d">via ❄️ ghostty-env</span>
+<span class="b">❯</span> jj status
+The working copy has no changes.
+Working copy  (@) : <span class="y">qzyxxpqy</span> <span class="b">be79660f</span> <span class="g">(empty)</span>
+<span class="b">❯</span> <span class="cursor"></span></div>
+        </section>
+      </div>
+    </div>
+    </div>
+    <div class="palette" role="dialog" aria-label="Command palette" hidden>
+      <label class="palette-search"><svg viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 14 14"/></svg><input id="palette-input" placeholder="Search commands…" autocomplete="off" aria-label="Search commands"></label>
+      <div class="palette-list" role="listbox"></div>
+      <div class="palette-foot"><span>Run<kbd>↵</kbd></span><span>Close<kbd>Esc</kbd></span></div>
+    </div>
+  </section>
+
+  <form class="controls" onsubmit="return false">
+    <label>Theme <select id="theme"><option value="">Rex dark</option><option value="light">Rex light</option><option value="kanagawa">Kanagawa Wave (your theme)</option></select></label>
+    <label>Tabs <select id="layout"><option value="">Top bar</option><option value="tabs-hidden side-open" selected>Vertical</option></select></label>
+    <label>Focused pane <select id="focus"><option value="focus-dim">Dim the other panes</option><option value="">No mark</option></select></label>
+    <label>Dim <input type="range" id="dim" min="30" max="90" value="55"><output id="dim-value">55%</output></label>
+    <label>Pane buttons <select id="actions"><option value="actions-faint">Always, faint</option><option value="">Hover only</option></select></label>
+    <label>Gaps and corners <select id="spacing"><option value="">Rex · 10 px gaps, 12 px corners</option><option value="spacing-current">Current GTK · 6 px gaps, 8 px corners</option></select></label>
+    <label><input type="checkbox" id="status" checked> Lua status</label>
+  </form>
+  <p class="note">Rex marks the focused pane only by dimming the other panes; “Dim” sets how visible the other panes stay. Vertical mode has no top bar. The sidebar button (in the side list, or at the left of the first pane header) and Ctrl+Shift+B show or hide the side list. The ⌘ button opens the command palette: type to filter, ↑ ↓ to move, Enter or Escape to close. Click a tab or a pane to select it. The tab shows the app icon, then one bar for each pane in the tab (a green bar is the focused pane). Long tab labels fade out instead of showing “…”. A dot is the existing attention marker; hover shows the close button. The pane buttons are split right, split down, zoom and close; zoom works in this draft. Rex's eye button is not included because Ghostty has no matching action.</p>
+</main>
+<script>
+  const $ = s => document.querySelector(s);
+  // Icons for Helix, Codex and Claude only; every other program uses the terminal icon.
+  // Each icon is a glyph and a colour. Tabs use a coloured tile; pane
+  // headers use the glyph in the colour. Unknown programs use the terminal icon.
+  const apps = {
+    terminal: ['#5c5c63', '<path d="M3 4.5 6 7.5 3 10.5M8 11.5h5"/>'],
+    claude: ['#d97757', '<path d="M8 2v12M2 8h12M3.8 3.8l8.4 8.4M12.2 3.8l-8.4 8.4"/>'],
+    hx: ['#8c6bd6', '<path d="M3.5 3.5c5 1 4 4 9 5M3.5 7.5c5 1 4 4 9 5"/><path d="M12.5 3.5 9.8 5M6.2 11 3.5 12.5"/>'],
+    codex: ['#10a37f', '<ellipse cx="8" cy="8" rx="5.5" ry="2.4"/><ellipse cx="8" cy="8" rx="5.5" ry="2.4" transform="rotate(60 8 8)"/><ellipse cx="8" cy="8" rx="5.5" ry="2.4" transform="rotate(120 8 8)"/>'],
+  };
+  const glyph = app => `<svg viewBox="0 0 16 16">${(apps[app] || apps.terminal)[1]}</svg>`;
+  const tile = app => `<span class="app-icon" style="--app:${(apps[app] || apps.terminal)[0]}">${glyph(app)}</span>`;
+  document.querySelectorAll('.pane').forEach(pane => {
+    const app = pane.dataset.app;
+    pane.querySelector('.pane-head > svg').outerHTML = `<span class="pane-icon" style="--app:${apps[app] ? apps[app][0] : 'var(--muted)'}">${glyph(app)}</span>`;
+  });
+
+  const tabs = [
+    { app: 'hx', path: '~/dev/projects/ghostty', others: ['claude', 'zig', 'nu'] },
+    { app: 'claude', path: '~/dev/projects/ghostty/src/apprt/gtk', others: [], attention: true },
+    { app: 'codex', path: '~/.config/hamlet', others: ['nu'] },
+    { app: 'nu', path: '~/dev/projects/site', others: [] },
+    { app: 'btop', path: '~', others: [] },
+  ];
+  let selected = 0;
+
+  // The top bar and the side list show the same tabs.
+  function renderTabs() {
+    document.querySelectorAll('.track, .side-list').forEach(list => { list.innerHTML = ''; });
+    document.querySelectorAll('.track, .side-list').forEach(list => tabs.forEach((tab, index) => {
+      const button = document.createElement('div');
+      button.className = 'tab' + (index === selected ? ' selected' : '');
+      button.setAttribute('role', 'tab');
+      button.tabIndex = 0;
+      button.title = `${tab.app} ${tab.path} · ${tab.others.length + 1} pane${tab.others.length ? "s" : ""}`;
+      button.innerHTML = `<span class="app">${tile(tab.app)}</span>`
+        + `<span class="label"><b>${tab.app}</b> ${tab.path}</span>`
+        + `<span class="end">${tab.attention ? '<span class="dot"></span>' : ''}<button class="close" aria-label="Close tab">×</button></span>`;
+      button.addEventListener('click', event => {
+        if (event.target.closest('.close')) {
+          tabs.splice(index, 1);
+          selected = Math.min(selected, tabs.length - 1);
+        } else {
+          selected = index;
+          tab.attention = false;
+        }
+        renderTabs();
+      });
+      list.append(button);
+    }));
+  }
+  renderTabs();
+
+  document.querySelectorAll('.add-tab').forEach(button => button.addEventListener('click', () => {
+    tabs.push({ app: 'nu', path: '~', others: [] });
+    selected = tabs.length - 1;
+    renderTabs();
+  }));
+
+  // Pane header buttons, focus and zoom.
+  const actionIcons = [
+    ['Split right', '<svg viewBox="0 0 16 16"><rect x="2.5" y="3" width="11" height="10" rx="1.5"/><path d="M8 3v10"/></svg>'],
+    ['Split down', '<svg viewBox="0 0 16 16"><rect x="2.5" y="3" width="11" height="10" rx="1.5"/><path d="M2.5 8h11"/></svg>'],
+    ['Zoom', '<svg viewBox="0 0 16 16"><path d="M9.5 3h3.5v3.5M13 3 9 7M6.5 13H3V9.5M3 13l4-4"/></svg>'],
+    ['Close', '<svg viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></svg>'],
+  ];
+  document.querySelectorAll('.pane').forEach(pane => {
+    const actions = document.createElement('span');
+    actions.className = 'actions';
+    actionIcons.forEach(([name, svg]) => {
+      const button = document.createElement('button');
+      button.type = 'button'; button.title = name; button.setAttribute('aria-label', name); button.innerHTML = svg;
+      if (name === 'Zoom') button.addEventListener('click', () => pane.classList.toggle('zoomed'));
+      actions.append(button);
+    });
+    pane.querySelector('.pane-head').append(actions);
+    const focus = () => document.querySelectorAll('.pane').forEach(p => p.classList.toggle('active', p === pane));
+    pane.addEventListener('pointerdown', focus);
+    pane.addEventListener('focusin', focus);
+  });
+
+  // Command palette. The commands are existing Ghostty actions; "›" opens a second step.
+  const commands = [
+    ['Window', 'Toggle Tab List', 'Ctrl+Shift+B'],
+    ['Session', 'Switch Session…', 'Alt+Space', true], ['Session', 'Rename Session', '', true], ['Session', 'Save Session', 'Alt+S'],
+    ['Session', 'New Session', 'Alt+N'], ['Session', 'Pick Theme…', '', true],
+    ['Tab', 'New Tab', 'Ctrl+Shift+T'], ['Tab', 'Rename Tab', '', true], ['Tab', 'Close Tab', 'Ctrl+Shift+W'], ['Tab', 'New Window', 'Ctrl+Shift+N'],
+    ['Pane', 'Split Pane Right', 'Ctrl+Shift+O'], ['Pane', 'Split Pane Down', 'Ctrl+Shift+E'], ['Pane', 'Toggle Pane Zoom', 'Ctrl+Shift+Enter'],
+    ['Pane', 'Stack Pane', 'Alt+P'], ['Pane', 'Toggle Floating Terminal', 'Alt+`'], ['Pane', 'Toggle Pane Decorations', ''],
+  ];
+  let paletteIndex = 0;
+  function renderPalette() {
+    const query = $('#palette-input').value.toLowerCase();
+    const shown = commands.filter(([, name]) => name.toLowerCase().includes(query));
+    paletteIndex = Math.max(0, Math.min(paletteIndex, shown.length - 1));
+    const list = $('.palette-list');
+    list.innerHTML = shown.length ? '' : '<div class="palette-empty">No matching commands</div>';
+    let section = null;
+    shown.forEach(([group, name, keys, more], index) => {
+      if (group !== section && !query) list.insertAdjacentHTML('beforeend', `<div class="palette-section">${group}</div>`);
+      section = group;
+      const item = document.createElement('button');
+      item.className = 'palette-item' + (index === paletteIndex ? ' selected' : '');
+      item.setAttribute('role', 'option');
+      item.innerHTML = `<span>${name}</span>${keys ? `<kbd>${keys}</kbd>` : ''}<span class="more">${more ? '›' : ''}</span>`;
+      item.addEventListener('mousemove', () => { if (paletteIndex !== index) { paletteIndex = index; renderPalette(); } });
+      item.addEventListener('click', () => runCommand(name));
+      list.append(item);
+    });
+    list.querySelector('.selected')?.scrollIntoView({ block: 'nearest' });
+    return shown.length;
+  }
+  function closePalette() { $('.palette').hidden = true; }
+  // Only "Toggle Tab List" does something in this draft.
+  function runCommand(name) {
+    closePalette();
+    if (name === 'Toggle Tab List') toggleSide();
+  }
+  document.querySelectorAll('.open-palette').forEach(button => button.addEventListener('click', event => {
+    event.stopPropagation();
+    $('.palette').hidden = !$('.palette').hidden;
+    $('#palette-input').value = ''; paletteIndex = 0; renderPalette();
+    $('#palette-input').focus();
+  }));
+  $('#palette-input').addEventListener('input', () => { paletteIndex = 0; renderPalette(); });
+  $('#palette-input').addEventListener('keydown', event => {
+    const count = renderPalette();
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      paletteIndex = (paletteIndex + (event.key === 'ArrowDown' ? 1 : -1) + count) % Math.max(count, 1);
+      renderPalette();
+    } else if (event.key === 'Enter') {
+      const selected = $('.palette-item.selected span');
+      selected ? runCommand(selected.textContent) : closePalette();
+    } else if (event.key === 'Escape') closePalette();
+  });
+  document.addEventListener('pointerdown', event => { if (!event.target.closest('.palette, .open-palette')) closePalette(); });
+
+  // Study controls. Each select owns one group of body classes.
+  const groups = { theme: ['light', 'kanagawa'], layout: ['tabs-hidden', 'side-open'], focus: ['focus-dim'], actions: ['actions-faint'], spacing: ['spacing-current'] };
+  Object.entries(groups).forEach(([id, classes]) => $('#' + id).addEventListener('change', event => {
+    document.body.classList.remove(...classes);
+    if (event.target.value) document.body.classList.add(...event.target.value.split(' '));
+  }));
+  $('#dim').addEventListener('input', event => {
+    document.documentElement.style.setProperty('--dim', event.target.value / 100);
+    $('#dim-value').value = event.target.value + '%';
+  });
+  // In vertical mode, the sidebar button and Ctrl+Shift+B show or hide the side list.
+  // Hiding it gives the minimal layout; it is not a separate mode.
+  function toggleSide() {
+    if (document.body.classList.contains('tabs-hidden')) document.body.classList.toggle('side-open');
+  }
+  document.querySelectorAll('.side-toggle').forEach(button => button.addEventListener('click', toggleSide));
+  document.addEventListener('keydown', event => {
+    if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'b') { event.preventDefault(); toggleSide(); }
+  });
+  $('#status').addEventListener('change', event => { $('.tools .status').hidden = !event.target.checked; });
+</script>
+</html>

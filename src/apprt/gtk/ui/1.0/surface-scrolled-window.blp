@@ -17,15 +17,27 @@ template $GhostttySurfaceScrolledWindow: Adw.Bin {
       Gtk.Box pane_header {
         styles ["pane-titlebar"]
         visible: false;
-        Gtk.Button {
+        // Shown on the first pane while the side tab list is hidden.
+        Gtk.Button pane_lead {
+          styles ["flat", "pane-lead"]
+          icon-name: "ghostty-sidebar-symbolic";
+          action-name: "win.toggle-toolbar";
+          tooltip-text: _("Show Tabs");
+          visible: false;
+          valign: center;
+          focus-on-click: false;
+        }
+        Gtk.Button pane_title_button {
           styles ["flat"]
           hexpand: true;
           focus-on-click: false;
           clicked => $focus_pane();
           child: Gtk.Box {
-            spacing: 9;
-            Gtk.Box {
-              styles ["pane-focus-dot"]
+            spacing: 8;
+            Gtk.Image pane_icon {
+              styles ["pane-icon"]
+              icon-name: "ghostty-program-terminal-symbolic";
+              pixel-size: 15;
               valign: center;
             }
             Gtk.Label pane_title {
@@ -36,12 +48,37 @@ template $GhostttySurfaceScrolledWindow: Adw.Bin {
             }
           };
         }
-        Gtk.Button {
-          styles ["flat"]
-          icon-name: "window-close-symbolic";
-          tooltip-text: _("Close terminal");
-          focus-on-click: false;
-          clicked => $close_pane();
+        Gtk.Box {
+          styles ["pane-actions"]
+          valign: center;
+          Gtk.Button {
+            styles ["flat"]
+            icon-name: "ghostty-split-right-symbolic";
+            tooltip-text: _("Split Right");
+            focus-on-click: false;
+            clicked => $split_right();
+          }
+          Gtk.Button {
+            styles ["flat"]
+            icon-name: "ghostty-split-down-symbolic";
+            tooltip-text: _("Split Down");
+            focus-on-click: false;
+            clicked => $split_down();
+          }
+          Gtk.Button {
+            styles ["flat"]
+            icon-name: "ghostty-zoom-pane-symbolic";
+            tooltip-text: _("Toggle Pane Zoom");
+            focus-on-click: false;
+            clicked => $zoom_pane();
+          }
+          Gtk.Button {
+            styles ["flat"]
+            icon-name: "window-close-symbolic";
+            tooltip-text: _("Close terminal");
+            focus-on-click: false;
+            clicked => $close_pane();
+          }
         }
       }
       Gtk.ScrolledWindow scrolled_window {

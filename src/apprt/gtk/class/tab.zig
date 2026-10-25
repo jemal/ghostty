@@ -20,6 +20,7 @@ const Config = @import("config.zig").Config;
 const Application = @import("application.zig").Application;
 const SplitTree = @import("split_tree.zig").SplitTree;
 const Surface = @import("surface.zig").Surface;
+const program_icon = @import("../program_icon.zig");
 const TitleDialog = @import("title_dialog.zig").TitleDialog;
 const Overrides = @import("Overrides.zig");
 
@@ -121,6 +122,34 @@ pub const Tab = extern struct {
             );
         };
 
+        /// The name of the program in the active surface.
+        pub const @"program-name" = struct {
+            pub const name = "program-name";
+            const impl = gobject.ext.defineProperty(
+                name,
+                Self,
+                ?[:0]const u8,
+                .{
+                    .default = null,
+                    .accessor = C.privateStringFieldAccessor("program_name"),
+                },
+            );
+        };
+
+        /// The tile icon of the program in the active surface.
+        pub const @"icon-name" = struct {
+            pub const name = "icon-name";
+            const impl = gobject.ext.defineProperty(
+                name,
+                Self,
+                ?[:0]const u8,
+                .{
+                    .default = null,
+                    .accessor = C.privateStringFieldAccessor("icon_name"),
+                },
+            );
+        };
+
         pub const title = struct {
             pub const name = "title";
             const impl = gobject.ext.defineProperty(
@@ -183,6 +212,12 @@ pub const Tab = extern struct {
 
         /// The tooltip of this tab. This is usually bound to the active surface.
         tooltip: ?[:0]const u8 = null,
+
+        /// The tile icon of the program in the active surface.
+        icon_name: ?[:0]const u8 = null,
+
+        /// The name of the program in the active surface.
+        program_name: ?[:0]const u8 = null,
 
         // Template bindings
         split_tree: *SplitTree,
@@ -841,6 +876,14 @@ pub const Tab = extern struct {
 
     fn finalize(self: *Self) callconv(.c) void {
         const priv = self.private();
+        if (priv.icon_name) |v| {
+            glib.free(@ptrCast(@constCast(v)));
+            priv.icon_name = null;
+        }
+        if (priv.program_name) |v| {
+            glib.free(@ptrCast(@constCast(v)));
+            priv.program_name = null;
+        }
         if (priv.tooltip) |v| {
             glib.free(@ptrCast(@constCast(v)));
             priv.tooltip = null;
@@ -987,6 +1030,11 @@ pub const Tab = extern struct {
         return glib.markupPrintfEscaped("<b>%s</b>\n%s", text, path);
     }
 
+    fn closureComputedIconName(_: *Self, program: c_uint) callconv(.c) ?[*:0]const u8 {
+        const value = std.enums.fromInt(program_icon.Program, program) orelse .terminal;
+        return glib.ext.dupeZ(u8, value.tile());
+    }
+
     fn closureComputedTitle(
         _: *Self,
         config_: ?*Config,
@@ -1077,6 +1125,8 @@ pub const Tab = extern struct {
                 properties.title.impl,
                 properties.@"title-override".impl,
                 properties.tooltip.impl,
+                properties.@"icon-name".impl,
+                properties.@"program-name".impl,
             });
 
             // Bindings
@@ -1086,6 +1136,7 @@ pub const Tab = extern struct {
             // Template Callbacks
             class.bindTemplateCallback("computed_title", &closureComputedTitle);
             class.bindTemplateCallback("computed_tooltip", &closureComputedTooltip);
+            class.bindTemplateCallback("computed_icon_name", &closureComputedIconName);
             class.bindTemplateCallback("notify_active_surface", &propActiveSurface);
             class.bindTemplateCallback("notify_tree", &propSplitTree);
 

@@ -14,43 +14,169 @@ window.ssd.no-border-radius {
 
 /* Compact presentation owns tab geometry; AdwTabView owns tab behavior. */
 .window .tab-strip-header.compact-tabs {
-  min-height: 38px;
+  min-height: 46px;
   background: var(--window-bg-color);
   color: var(--window-fg-color);
+}
+
+/* Decorated panes are cards on a darker window background. The bar uses the
+ * window background too. --ghostty-shell-bg comes from window-theme=ghostty. */
+.window.pane-decorations {
+  --ghostty-bar-bg: var(--ghostty-shell-bg);
+  background-color: var(--ghostty-shell-bg, color-mix(in srgb, black 20%, var(--window-bg-color)));
+}
+
+.window.pane-decorations .tab {
+  padding: 0 5px 5px 5px;
 }
 
 .window .compact-tab-scroll {
   background: transparent;
 }
 
+/* gtk-tabs-location = left: a side column on the window background. The
+ * head row lines up with the first pane header. */
+.window.tabs-left.pane-decorations .tab {
+  padding-top: 5px;
+}
+
+.window .tab-side {
+  padding: 10px 0 10px 10px;
+}
+
+.window .tab-side-head {
+  min-height: 36px;
+  padding: 0 2px;
+}
+
+.window .tab-side-head button {
+  min-width: 28px;
+  min-height: 26px;
+  padding: 0;
+  border-radius: 6px;
+  color: color-mix(in srgb, var(--window-fg-color) 62%, transparent);
+}
+
+.window .tab-side-head button:hover {
+  color: var(--window-fg-color);
+}
+
+.window .tab-side-head label {
+  font-size: 16px;
+}
+
+.window .tab-side-session {
+  margin: 8px 0 6px;
+  padding: 2px 8px;
+  min-height: 0;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: color-mix(in srgb, var(--window-fg-color) 55%, transparent);
+}
+
+.window .tab-side-session:hover {
+  color: var(--window-fg-color);
+}
+
+.window .side-tab-box .compact-tab {
+  min-height: 34px;
+  border-radius: 9px;
+  font-size: 14px;
+}
+
+.window .side-tab-box .compact-tab:not(.selected):hover {
+  background: color-mix(in srgb, var(--window-fg-color) 5%, transparent);
+}
+
+.window .side-tab-box .compact-tab:not(.selected) + .compact-tab:not(.selected) {
+  background-image: none;
+}
+
+.window .side-tab-box .compact-tab-select {
+  padding: 0 0 0 8px;
+}
+
+.window .side-tab-box .compact-tab.drop-before {
+  box-shadow: 0 -2px var(--accent-color);
+}
+
+.window .side-tab-box .compact-tab.drop-after {
+  box-shadow: 0 2px var(--accent-color);
+}
+
+/* The header's first icon is as far from the left edge as from the top. */
+.pane-titlebar .pane-lead {
+  min-width: 24px;
+  min-height: 22px;
+  padding: 1px 4px 1px 2px;
+  border-radius: 6px;
+}
+
+/* The tabs sit in one rounded track; the selected tab is a raised pill. */
 .window .compact-tab-box {
-  padding: 3px 4px;
+  margin: 0 4px;
+  padding: 3px;
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--window-fg-color) 5%, transparent);
 }
 
 .window .compact-tab {
-  min-height: 25px;
+  min-height: 28px;
   border: 1px solid transparent;
-  border-radius: 7px;
-  background: color-mix(in srgb, var(--window-fg-color) 4%, var(--window-bg-color));
-  color: color-mix(in srgb, var(--window-fg-color) 65%, var(--window-bg-color));
+  border-radius: 8px;
+  background: transparent;
+  color: color-mix(in srgb, var(--window-fg-color) 62%, transparent);
   font-size: 15px;
 }
 
 .window .compact-tab:hover {
-  background: color-mix(in srgb, var(--window-fg-color) 7%, var(--window-bg-color));
   color: var(--window-fg-color);
 }
 
 .window .compact-tab.selected {
-  background: color-mix(in srgb, var(--accent-color) 14%, var(--window-bg-color));
-  border-color: color-mix(in srgb, var(--accent-color) 45%, transparent);
+  background: color-mix(in srgb, var(--window-fg-color) 11%, transparent);
+  border-color: color-mix(in srgb, var(--window-fg-color) 9%, transparent);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
   color: var(--window-fg-color);
 }
 
+/* Short dividers between two tabs that are not selected. */
+.window .compact-tab:not(.selected) + .compact-tab:not(.selected) {
+  background-image: linear-gradient(to bottom, transparent 25%, color-mix(in srgb, var(--window-fg-color) 12%, transparent) 25%, color-mix(in srgb, var(--window-fg-color) 12%, transparent) 75%, transparent 75%);
+  background-size: 1px 100%;
+  background-position: left center;
+  background-repeat: no-repeat;
+}
+
+.window .compact-tab-icon {
+  margin-right: 2px;
+}
+
+.window .compact-window-tools {
+  margin-right: 6px;
+}
+
+.window .compact-window-tools button {
+  min-width: 30px;
+  min-height: 30px;
+  padding: 0;
+  border-radius: 7px;
+  color: color-mix(in srgb, var(--window-fg-color) 62%, transparent);
+}
+
+.window .compact-window-tools button:hover {
+  color: var(--window-fg-color);
+}
+
+.window .compact-window-tools label {
+  font-size: 17px;
+}
+
 @keyframes compact-attention-arrival {
-  0%, 38%, 100% { background: color-mix(in srgb, var(--window-fg-color) 4%, var(--window-bg-color)); }
-  15% { background: color-mix(in srgb, var(--accent-color) 16%, var(--window-bg-color)); }
-  58% { background: color-mix(in srgb, var(--accent-color) 10%, var(--window-bg-color)); }
+  0%, 38%, 100% { background: transparent; }
+  15% { background: color-mix(in srgb, var(--accent-color) 16%, transparent); }
+  58% { background: color-mix(in srgb, var(--accent-color) 10%, transparent); }
 }
 .window .compact-tab.attention-pulse:not(.selected) {
   animation: compact-attention-arrival 1200ms ease-out 1;
@@ -80,11 +206,11 @@ window.ssd.no-border-radius {
 }
 
 .window .compact-tab-select {
-  padding: 0 0 0 10px;
+  padding: 0 0 0 6px;
 }
 
 .window .compact-tab.inverted .compact-tab-select {
-  padding: 0 10px 0 0;
+  padding: 0 6px 0 0;
 }
 
 .window .compact-tab.drop-before {
@@ -96,8 +222,14 @@ window.ssd.no-border-radius {
 }
 
 .window .compact-tab-close {
-  padding: 0 8px;
+  padding: 0 4px;
   opacity: 0.65;
+}
+
+/* Only the selected tab and the tab under the pointer show the close button.
+ * The button keeps its space, so tabs do not change width. */
+.window .compact-tab:not(.selected):not(:hover):not(:focus-within) .compact-tab-close {
+  opacity: 0;
 }
 
 .window .compact-tab-close:hover {
@@ -123,7 +255,13 @@ window.ssd.no-border-radius {
 
 .window .session-selector .session-name {
   font-size: 1em;
-  font-weight: 500;
+  font-weight: 600;
+}
+
+.window .session-selector .session-state {
+  font-size: 12px;
+  font-weight: 400;
+  opacity: 0.6;
 }
 
 .window .session-selector .session-name.dim-label {
@@ -295,6 +433,12 @@ label.resize-overlay {
   opacity: 1;
 }
 
+/* Pane headers are the drag handle while they are shown. */
+.drag-handle.replaced,
+.drag-handle.replaced:hover {
+  opacity: 0;
+}
+
 .drop-overlay.drop-left {
   background: linear-gradient(
     to left,
@@ -334,6 +478,40 @@ label.resize-overlay {
 /*
  * Command Palette
  */
+dialog.command-palette .command-palette-view row {
+  min-height: 32px;
+  padding: 0 10px;
+  border-radius: 7px;
+}
+
+dialog.command-palette .command-palette-view row:selected {
+  background: color-mix(in srgb, var(--accent-color) 38%, transparent);
+  color: var(--window-fg-color);
+}
+
+dialog.command-palette .command-palette-view .title {
+  font-size: 14px;
+}
+
+/* Shortcuts as plain text, not key caps. */
+dialog.command-palette shortcut {
+  opacity: 0.7;
+  font-size: 12px;
+  border-spacing: 2px;
+}
+
+dialog.command-palette shortcut > label,
+dialog.command-palette shortcut > label.keycap {
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: none;
+  box-shadow: none;
+  background: none;
+  font-size: 12px;
+}
+
 .command-palette-search > image:first-child {
   margin-left: 8px;
   margin-right: 4px;
@@ -424,33 +602,71 @@ label.resize-overlay {
   opacity: 0;
 }
 
+/* Panes are rounded cards in the terminal colour, 10 px apart. Focus is shown
+ * only by dimming the other panes (unfocused-split-opacity and the headers). */
 .decorated-pane {
-  margin: 3px;
-  border: 1px solid color-mix(in srgb, currentColor 12%, transparent);
-  border-radius: 8px;
-  background: var(--window-bg-color);
-  color: var(--window-fg-color);
-  transition: border-color 160ms ease, box-shadow 160ms ease;
+  margin: 5px;
+  border: 1px solid color-mix(in srgb, currentColor 6%, transparent);
+  border-radius: 12px;
+  background: var(--view-bg-color);
+  color: var(--view-fg-color);
 }
 
 .pane-stack {
-  margin: 3px;
-  border: 1px solid color-mix(in srgb, currentColor 12%, transparent);
-  border-radius: 8px;
-  background: var(--window-bg-color);
-  color: var(--window-fg-color);
+  margin: 5px;
+  border: 1px solid color-mix(in srgb, currentColor 6%, transparent);
+  border-radius: 12px;
+  background: var(--view-bg-color);
+  color: var(--view-fg-color);
 }
 
-.stack-member:not(.active) .pane-titlebar label {
-  opacity: 0.65;
+.pane-titlebar {
+  min-height: 36px;
+  padding: 0 8px 0 4px;
+  font-size: 14px;
+  background: transparent;
 }
 
-.decorated-pane.active {
-  border-color: color-mix(in srgb, currentColor 24%, transparent);
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+/* The title is a button only so that a click selects the pane. */
+.pane-titlebar > button,
+.pane-titlebar > button:hover,
+.pane-titlebar > button:active {
+  padding: 2px 6px;
+  background: none;
+  box-shadow: none;
 }
 
-.pane-titlebar,
+.pane-titlebar > button label,
+.pane-titlebar .pane-icon {
+  transition: opacity 160ms ease;
+}
+
+.decorated-pane:not(.active) > .pane-titlebar > button label,
+.decorated-pane:not(.active) > .pane-titlebar .pane-icon,
+.stack-member:not(.active) > .pane-titlebar > button label,
+.stack-member:not(.active) > .pane-titlebar .pane-icon {
+  opacity: 0.55;
+}
+
+/* Split right, split down, zoom and close: faint until the pointer is over
+ * the pane. */
+.pane-titlebar .pane-actions {
+  opacity: 0.5;
+  transition: opacity 120ms ease;
+}
+
+.decorated-pane:hover .pane-actions,
+.stack-member:hover .pane-actions {
+  opacity: 1;
+}
+
+.pane-titlebar .pane-actions button {
+  min-width: 24px;
+  min-height: 22px;
+  padding: 1px 4px;
+  border-radius: 6px;
+}
+
 .floating-titlebar {
   font-size: 14px;
   background: color-mix(in srgb, var(--window-fg-color) 2%, var(--window-bg-color));
@@ -459,8 +675,6 @@ label.resize-overlay {
 }
 
 /* Quiet focused headers share the compact tab accent without a colored edge. */
-.decorated-pane.active .pane-titlebar,
-.stack-member.active .pane-titlebar,
 .floating-terminal.active .floating-titlebar {
   background: color-mix(in srgb, var(--accent-color) 3%, var(--window-bg-color));
 }
@@ -478,48 +692,33 @@ label.resize-overlay {
   background: color-mix(in srgb, var(--window-fg-color) 30%, transparent);
 }
 
-.active > .pane-titlebar .pane-focus-dot,
 .active > .floating-titlebar .pane-focus-dot {
   background: var(--accent-color);
 }
 
-.pane-titlebar button,
 .floating-titlebar button {
   padding: 4px 6px;
   min-height: 21px;
 }
 
-.pane-titlebar button:first-child,
 .floating-titlebar button:first-child {
   padding-left: 12px;
 }
 
-.pane-titlebar button:last-child,
 .floating-titlebar button:last-child {
   padding-right: 12px;
   /* Reserve the close control's width even while its icon is hidden. */
   opacity: 0;
 }
 
-.decorated-pane.active > .pane-titlebar button:last-child,
-.decorated-pane:hover > .pane-titlebar button:last-child,
-.decorated-pane:focus-within > .pane-titlebar button:last-child,
-.stack-member.active > .pane-titlebar button:last-child,
-.stack-member:hover > .pane-titlebar button:last-child,
-.stack-member:focus-within > .pane-titlebar button:last-child,
 .floating-terminal.active > .floating-titlebar button:last-child,
 .floating-terminal:hover > .floating-titlebar button:last-child,
 .floating-terminal:focus-within > .floating-titlebar button:last-child {
   opacity: 1;
 }
 
-.decorated-pane:not(.active) .pane-titlebar label,
 .floating-terminal:not(.active) .floating-titlebar label {
   opacity: 0.65;
-}
-
-.pane-titlebar label {
-  transition: opacity 160ms ease;
 }
 
 /* Pinned chips reserve the same marker space without exposing a close action. */

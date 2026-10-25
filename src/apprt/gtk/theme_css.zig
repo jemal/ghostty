@@ -5,6 +5,13 @@ const Config = @import("../../config/Config.zig");
 pub fn write(writer: *std.Io.Writer, config: *const Config, selector: []const u8) !void {
     const headerbar_background = config.@"window-titlebar-background" orelse config.background;
     const headerbar_foreground = config.@"window-titlebar-foreground" orelse config.foreground;
+    // Decorated panes sit on a darker window background, like cards. Light
+    // themes need much less black for the same difference.
+    const shell_shade: u8 = shade: {
+        const bg = config.background;
+        const luma = (@as(u32, bg.r) * 299 + @as(u32, bg.g) * 587 + @as(u32, bg.b) * 114) / 1000;
+        break :shade if (luma < 128) 28 else 7;
+    };
     try writer.print(
         \\{s} {{
         \\  --ghostty-fg: rgb({d},{d},{d});
@@ -13,6 +20,7 @@ pub fn write(writer: *std.Io.Writer, config: *const Config, selector: []const u8
         \\  --ghostty-rail-bg: color-mix(in srgb, var(--ghostty-fg) 5%, var(--ghostty-bg));
         \\  --ghostty-raised-bg: color-mix(in srgb, var(--ghostty-fg) 8%, var(--ghostty-bg));
         \\  --ghostty-accent: rgb({d},{d},{d});
+        \\  --ghostty-shell-bg: color-mix(in srgb, black {d}%, var(--ghostty-bg));
         \\  --headerbar-fg-color: var(--ghostty-fg);
         \\  --headerbar-bg-color: var(--ghostty-chrome-bg);
         \\  --headerbar-backdrop-color: oklab(from var(--headerbar-bg-color) calc(l * 0.9) a b / alpha);
@@ -39,11 +47,7 @@ pub fn write(writer: *std.Io.Writer, config: *const Config, selector: []const u8
         \\  color: var(--ghostty-fg);
         \\}}
         \\{s} .tab-strip-header.compact-tabs {{
-        \\  background: var(--ghostty-bg);
-        \\}}
-        \\{s} :is(.native-picker, .floating-terminal) {{
-        \\  background: var(--ghostty-raised-bg);
-        \\  color: var(--ghostty-fg);
+        \\  background: var(--ghostty-bar-bg, var(--ghostty-bg));
         \\}}
         \\{s} listview.command-palette-view {{
         \\  --view-fg-color: var(--ghostty-fg);
@@ -55,6 +59,9 @@ pub fn write(writer: *std.Io.Writer, config: *const Config, selector: []const u8
         \\}}
         \\{s} windowhandle:backdrop {{
         \\ background-color: var(--headerbar-backdrop-color);
+        \\}}
+        \\{s} .tab-side windowhandle {{
+        \\  background-color: transparent;
         \\}}
     , .{
         selector,
@@ -72,6 +79,7 @@ pub fn write(writer: *std.Io.Writer, config: *const Config, selector: []const u8
         config.palette.value[12].r,
         config.palette.value[12].g,
         config.palette.value[12].b,
+        shell_shade,
         selector,
         selector,
         selector,

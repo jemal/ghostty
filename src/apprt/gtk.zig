@@ -19,6 +19,7 @@ test {
     _ = @import("gtk/scale.zig");
     _ = @import("gtk/session.zig");
     _ = @import("gtk/pane_focus.zig");
+    _ = @import("gtk/program_icon.zig");
     _ = @import("gtk/picker/protocol.zig");
     _ = @import("gtk/picker/placement.zig");
 }

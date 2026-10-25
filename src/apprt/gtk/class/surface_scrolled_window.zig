@@ -1,5 +1,7 @@
 const std = @import("std");
 const adw = @import("adw");
+const gdk = @import("gdk");
+const glib = @import("glib");
 const gobject = @import("gobject");
 const gtk = @import("gtk");
 const gtk_version = @import("../gtk_version.zig");
@@ -7,6 +9,7 @@ const gtk_version = @import("../gtk_version.zig");
 const gresource = @import("../build/gresource.zig");
 const Common = @import("../class.zig").Common;
 const Surface = @import("surface.zig").Surface;
+const program_icon = @import("../program_icon.zig");
 const Config = @import("config.zig").Config;
 
 const log = std.log.scoped(.gtk_ghostty_surface_scrolled_window);
@@ -64,14 +67,24 @@ pub const SurfaceScrolledWindow = extern struct {
         pane_frame: *gtk.Box,
         pane_header: *gtk.Box,
         pane_title: *gtk.Label,
+        pane_icon: *gtk.Image,
+        pane_title_button: *gtk.Button,
+        pane_lead: *gtk.Button,
         stacked: bool = false,
         collapsed: bool = false,
-        surface_handlers: [3]c_ulong = .{ 0, 0, 0 },
+        surface_handlers: [5]c_ulong = .{ 0, 0, 0, 0, 0 },
         pub var offset: c_int = 0;
     };
 
     fn init(self: *Self, _: *Class) callconv(.c) void {
         gtk.Widget.initTemplate(self.as(gtk.Widget));
+
+        // Dragging the header moves the pane, like the surface's drag handle.
+        const drag = gtk.DragSource.new();
+        drag.setActions(.{ .move = true });
+        _ = gtk.DragSource.signals.prepare.connect(drag, *Self, headerDragPrepare, self, .{});
+        _ = gtk.DragSource.signals.drag_begin.connect(drag, *Self, headerDragBegin, self, .{});
+        self.private().pane_title_button.as(gtk.Widget).addController(drag.as(gtk.EventController));
         if (gtk_version.runtimeUntil(4, 20, 1)) self.disableKineticScroll();
     }
 
@@ -180,19 +193,38 @@ pub const SurfaceScrolledWindow = extern struct {
     pub fn refreshDecoration(self: *Self) void {
         const priv = self.private();
         const ext = @import("../ext.zig");
-        const tiled = ext.getAncestor(@import("split_tree.zig").SplitTree, self.as(gtk.Widget)) != null;
-        const enabled = if (ext.getAncestor(@import("window.zig").Window, self.as(gtk.Widget))) |window|
-            tiled and window.getPaneDecorations()
-        else
-            false;
+        const split_tree = ext.getAncestor(@import("split_tree.zig").SplitTree, self.as(gtk.Widget));
+        const window = ext.getAncestor(@import("window.zig").Window, self.as(gtk.Widget));
+        const enabled = if (window) |w| split_tree != null and w.getPaneDecorations() else false;
         const frame = priv.pane_frame.as(gtk.Widget);
         if (enabled and !priv.stacked) frame.addCssClass("decorated-pane") else frame.removeCssClass("decorated-pane");
         if (priv.stacked) frame.addCssClass("stack-member") else frame.removeCssClass("stack-member");
         priv.pane_header.as(gtk.Widget).setVisible(@intFromBool(enabled or priv.stacked));
+        // While the side tab list is hidden, the first pane (top left, or the
+        // zoomed pane) shows the button that brings it back.
+        const lead = lead: {
+            const w = window orelse break :lead false;
+            const tree = (split_tree orelse break :lead false).getTree() orelse break :lead false;
+            const surface = priv.surface orelse break :lead false;
+            if (!(enabled or priv.stacked) or !w.sideTabsHidden() or tree.nodes.len == 0) break :lead false;
+            const first = tree.deepest(.left, tree.zoomed orelse .root);
+            break :lead switch (tree.nodes[first.idx()]) {
+                .leaf => |view| view == surface,
+                .split => false,
+            };
+        };
+        priv.pane_lead.as(gtk.Widget).setVisible(@intFromBool(lead));
         if (priv.surface) |surface| {
+            surface.setDragHandleEnabled(!(enabled or priv.stacked));
             const title = surface.getEffectiveTitle() orelse "Terminal";
-            priv.pane_title.setLabel(title);
+            {
+                const alloc = @import("application.zig").Application.default().allocator();
+                const markup = program_icon.labelMarkup(alloc, surface.getProgramName() orelse "", title) catch null;
+                defer if (markup) |v| alloc.free(v);
+                if (markup) |v| priv.pane_title.setMarkup(v) else priv.pane_title.setLabel(title);
+            }
             priv.pane_title.as(gtk.Widget).setTooltipText(title);
+            priv.pane_icon.setFromIconName(surface.getProgram().glyph());
             if (surface.getFocused()) frame.addCssClass("active") else frame.removeCssClass("active");
         }
     }
@@ -205,7 +237,21 @@ pub const SurfaceScrolledWindow = extern struct {
         self.refreshDecoration();
     }
 
+    fn headerDragPrepare(src: *gtk.DragSource, x: f64, y: f64, self: *Self) callconv(.c) ?*gdk.ContentProvider {
+        const surface = self.private().surface orelse return null;
+        if (surface.core() == null) return null;
+        return Surface.dragPrepare(src, x, y, surface);
+    }
+
+    fn headerDragBegin(src: *gtk.DragSource, drag: *gdk.Drag, self: *Self) callconv(.c) void {
+        if (self.private().surface) |surface| Surface.dragBegin(src, drag, surface);
+    }
+
     fn focusPane(_: *gtk.Button, self: *Self) callconv(.c) void {
+        self.selectPane();
+    }
+
+    fn selectPane(self: *Self) void {
         if (self.private().surface) |surface| {
             const ext = @import("../ext.zig");
             if (ext.getAncestor(@import("split_tree.zig").SplitTree, self.as(gtk.Widget))) |tree|
@@ -213,6 +259,24 @@ pub const SurfaceScrolledWindow = extern struct {
             else
                 surface.grabFocus();
         }
+    }
+
+    /// Header buttons act on their own pane, so they select it first.
+    fn splitTreeAction(self: *Self, name: [:0]const u8, target: ?*glib.Variant) void {
+        self.selectPane();
+        _ = self.as(gtk.Widget).activateActionVariant(name, target);
+    }
+
+    fn splitRight(_: *gtk.Button, self: *Self) callconv(.c) void {
+        self.splitTreeAction("split-tree.new-split", glib.Variant.newString("right"));
+    }
+
+    fn splitDown(_: *gtk.Button, self: *Self) callconv(.c) void {
+        self.splitTreeAction("split-tree.new-split", glib.Variant.newString("down"));
+    }
+
+    fn zoomPane(_: *gtk.Button, self: *Self) callconv(.c) void {
+        self.splitTreeAction("split-tree.zoom", null);
     }
 
     fn closePane(_: *gtk.Button, self: *Self) callconv(.c) void {
@@ -248,7 +312,7 @@ pub const SurfaceScrolledWindow = extern struct {
 
         // Bind config from surface to our config property
         if (priv.surface) |surface| {
-            inline for (.{ "title", "title-override", "focused" }, 0..) |detail, i| {
+            inline for (.{ "title", "title-override", "focused", "program", "program-name" }, 0..) |detail, i| {
                 priv.surface_handlers[i] = gobject.Object.signals.notify.connect(surface, *Self, surfaceChanged, self, .{ .detail = detail });
             }
             const binding = surface.as(gobject.Object).bindProperty(
@@ -292,9 +356,15 @@ pub const SurfaceScrolledWindow = extern struct {
             class.bindTemplateChildPrivate("pane_frame", .{});
             class.bindTemplateChildPrivate("pane_header", .{});
             class.bindTemplateChildPrivate("pane_title", .{});
+            class.bindTemplateChildPrivate("pane_icon", .{});
+            class.bindTemplateChildPrivate("pane_title_button", .{});
+            class.bindTemplateChildPrivate("pane_lead", .{});
             class.bindTemplateCallback("refresh_decoration", &refreshDecorationCallback);
             class.bindTemplateCallback("focus_pane", &focusPane);
             class.bindTemplateCallback("close_pane", &closePane);
+            class.bindTemplateCallback("split_right", &splitRight);
+            class.bindTemplateCallback("split_down", &splitDown);
+            class.bindTemplateCallback("zoom_pane", &zoomPane);
 
             // Properties
             gobject.ext.registerProperties(class, &.{

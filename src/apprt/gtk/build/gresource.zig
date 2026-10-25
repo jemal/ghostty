@@ -64,6 +64,27 @@ pub const css = [_][]const u8{
     "style.css",
 };
 
+/// The path to the icons that pane headers and tabs show.
+pub const program_icons_path = "src/apprt/gtk/icons/scalable/apps";
+
+/// Program and pane-button icons in program_icons_path. GTK finds them by name through the
+/// application's resource path.
+pub const program_icons = [_][]const u8{
+    "ghostty-program-claude.svg",
+    "ghostty-program-claude-tile.svg",
+    "ghostty-program-codex.svg",
+    "ghostty-program-codex-tile.svg",
+    "ghostty-program-helix.svg",
+    "ghostty-program-helix-tile.svg",
+    "ghostty-program-terminal-symbolic.svg",
+    "ghostty-program-terminal-tile.svg",
+    "ghostty-session-symbolic.svg",
+    "ghostty-sidebar-symbolic.svg",
+    "ghostty-split-down-symbolic.svg",
+    "ghostty-split-right-symbolic.svg",
+    "ghostty-zoom-pane-symbolic.svg",
+};
+
 pub const Blueprint = struct {
     major: u16,
     minor: u16,
@@ -73,7 +94,7 @@ pub const Blueprint = struct {
 /// The list of filepaths that we depend on. Used for the build
 /// system to have proper caching.
 pub const file_inputs = deps: {
-    const total = (icon_sizes.len * 2) + blueprints.len + css.len;
+    const total = (icon_sizes.len * 2) + blueprints.len + css.len + program_icons.len;
     var deps: [total][]const u8 = undefined;
     var index: usize = 0;
     for (icon_sizes) |size| {
@@ -92,6 +113,10 @@ pub const file_inputs = deps: {
     }
     for (css) |name| {
         deps[index] = std.fmt.comptimePrint("{s}/{s}", .{ css_path, name });
+        index += 1;
+    }
+    for (program_icons) |name| {
+        deps[index] = std.fmt.comptimePrint("{s}/{s}", .{ program_icons_path, name });
         index += 1;
     }
     break :deps deps;
@@ -182,6 +207,15 @@ fn genIcons(io: std.Io, writer: *std.Io.Writer) !void {
                 .{ alias, build_info.base_application_id, source },
             );
         }
+    }
+
+    inline for (program_icons) |name| {
+        const source = std.fmt.comptimePrint("{s}/{s}", .{ program_icons_path, name });
+        try cwd.access(io, source, .{});
+        try writer.print(
+            \\    <file alias="scalable/apps/{s}">{s}</file>
+            \\
+        , .{ name, source });
     }
 
     try writer.writeAll(

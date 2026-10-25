@@ -11,6 +11,8 @@ const Common = @import("class.zig").Common;
 const Window = @import("class/window.zig").Window;
 const ext = @import("ext.zig");
 const layout = @import("compact_tab_layout.zig");
+const program_icon = @import("program_icon.zig");
+const Application = @import("class/application.zig").Application;
 
 pub const State = struct {
     view: ?*adw.TabView = null,
@@ -19,6 +21,8 @@ pub const State = struct {
     drop: *gtk.DropTarget = undefined,
     wheel: *gtk.EventControllerScroll = undefined,
     inverted: bool = false,
+    /// A vertical list at the side of the window instead of a row of tabs.
+    vertical: bool = false,
     controls: *gtk.Box = undefined,
     previous: *gtk.Button = undefined,
     next: *gtk.Button = undefined,
@@ -28,8 +32,8 @@ pub const State = struct {
     results: *gtk.Box = undefined,
     overflow_idle: ?c_uint = null,
 
-    pub fn init(self: *State, view: *adw.TabView, box: *gtk.Box, scroll: *gtk.ScrolledWindow) void {
-        self.* = .{ .view = view, .box = box, .scroll = scroll };
+    pub fn init(self: *State, view: *adw.TabView, box: *gtk.Box, scroll: *gtk.ScrolledWindow, vertical: bool) void {
+        self.* = .{ .view = view, .box = box, .scroll = scroll, .vertical = vertical };
         _ = adw.TabView.signals.page_attached.connect(view, *State, pagesChanged, self, .{ .after = true });
         _ = adw.TabView.signals.page_detached.connect(view, *State, pagesChanged, self, .{ .after = true });
         _ = adw.TabView.signals.page_reordered.connect(view, *State, pagesChanged, self, .{ .after = true });
@@ -75,7 +79,7 @@ pub const State = struct {
         const search_keys = gtk.EventControllerKey.new();
         _ = gtk.EventControllerKey.signals.key_pressed.connect(search_keys, *State, pickerKey, self, .{});
         self.search.as(gtk.Widget).addController(search_keys.as(gtk.EventController));
-        const adjustment = scroll.getHadjustment();
+        const adjustment = self.listAdjustment();
         _ = gtk.Adjustment.signals.changed.connect(adjustment, *State, adjustmentChanged, self, .{});
         _ = gtk.Adjustment.signals.value_changed.connect(adjustment, *State, adjustmentChanged, self, .{});
         self.sync();
@@ -89,6 +93,11 @@ pub const State = struct {
         return button;
     }
 
+    /// The adjustment along the list: horizontal for a row of tabs.
+    fn listAdjustment(self: *State) *gtk.Adjustment {
+        return if (self.vertical) self.scroll.getVadjustment() else self.scroll.getHadjustment();
+    }
+
     fn adjustmentChanged(_: *gtk.Adjustment, self: *State) callconv(.c) void {
         // Adjustment notifications can arrive inside size allocation. Changing
         // button visibility there invalidates an ancestor's active measurement.
@@ -98,17 +107,24 @@ pub const State = struct {
     fn updateOverflow(data: ?*anyopaque) callconv(.c) c_int {
         const self: *State = @ptrCast(@alignCast(data orelse return 0));
         self.overflow_idle = null;
-        const adjustment = self.scroll.getHadjustment();
+        if (self.vertical) {
+            // The side list scrolls normally and has room to show every tab.
+            self.controls.as(gtk.Widget).setVisible(0);
+            return 0;
+        }
+        const adjustment = self.listAdjustment();
         const maximum = @max(0, adjustment.getUpper() - adjustment.getPageSize());
         self.previous.as(gtk.Widget).setVisible(@intFromBool(maximum > 1));
         self.next.as(gtk.Widget).setVisible(@intFromBool(maximum > 1));
+        // Finding a tab is only useful when some tabs are out of view.
+        self.picker_button.as(gtk.Widget).setVisible(@intFromBool(maximum > 1));
         self.previous.as(gtk.Widget).setSensitive(@intFromBool(adjustment.getValue() > 1));
         self.next.as(gtk.Widget).setSensitive(@intFromBool(adjustment.getValue() < maximum - 1));
         return 0;
     }
 
     fn scrollBy(self: *State, direction: f64) void {
-        const adjustment = self.scroll.getHadjustment();
+        const adjustment = self.listAdjustment();
         adjustment.setValue(std.math.clamp(adjustment.getValue() + direction * adjustment.getPageSize() * 0.7, 0, @max(0, adjustment.getUpper() - adjustment.getPageSize())));
     }
     fn scrollPrevious(_: *gtk.Button, self: *State) callconv(.c) void {
@@ -180,7 +196,7 @@ pub const State = struct {
             _ = glib.Source.remove(source);
             self.overflow_idle = null;
         }
-        _ = gobject.signalHandlersDisconnectMatched(self.scroll.getHadjustment().as(gobject.Object), .{ .data = true }, 0, 0, null, null, self);
+        _ = gobject.signalHandlersDisconnectMatched(self.listAdjustment().as(gobject.Object), .{ .data = true }, 0, 0, null, null, self);
         self.picker.as(gtk.Widget).unparent();
         const parent = gobject.ext.cast(gtk.Box, self.controls.as(gtk.Widget).getParent().?).?;
         parent.remove(self.controls.as(gtk.Widget));
@@ -201,6 +217,10 @@ pub const State = struct {
             const chip = self.find(page) orelse Chip.new(page);
             chip.as(gtk.Box).reorderChildAfter(chip.private().close_slot.as(gtk.Widget), if (self.inverted) null else chip.private().select.as(gtk.Widget));
             if (self.inverted) chip.as(gtk.Widget).addCssClass("inverted") else chip.as(gtk.Widget).removeCssClass("inverted");
+            // In the side list, tabs fill its width and the close button is
+            // at the end.
+            chip.private().select.as(gtk.Widget).setHexpand(@intFromBool(self.vertical));
+            chip.private().label.as(gtk.Widget).setHexpand(@intFromBool(self.vertical));
             if (chip.as(gtk.Widget).getParent() == null) self.box.append(chip.as(gtk.Widget));
             self.box.reorderChildAfter(chip.as(gtk.Widget), previous);
             previous = chip.as(gtk.Widget);
@@ -255,20 +275,24 @@ pub const State = struct {
     }
 
     fn scrolled(_: *gtk.EventControllerScroll, _: f64, dy: f64, self: *State) callconv(.c) c_int {
-        const adjustment = self.scroll.getHadjustment();
+        // A vertical wheel already scrolls the side list.
+        if (self.vertical) return 0;
+        const adjustment = self.listAdjustment();
         const maximum = @max(0, adjustment.getUpper() - adjustment.getPageSize());
         if (maximum == 0) return 0;
         adjustment.setValue(std.math.clamp(adjustment.getValue() + dy * 40, 0, maximum));
         return 1;
     }
 
-    fn dragMotion(_: *gtk.DropTarget, x: f64, _: f64, self: *State) callconv(.c) gdk.DragAction {
-        const adjustment = self.scroll.getHadjustment();
-        const width: f64 = @floatFromInt(self.scroll.as(gtk.Widget).getWidth());
-        const delta: f64 = if (x < 24) -20 else if (x > width - 24) 20 else 0;
+    fn dragMotion(_: *gtk.DropTarget, x: f64, y: f64, self: *State) callconv(.c) gdk.DragAction {
+        // Scroll when the pointer is near either end of the list.
+        const adjustment = self.listAdjustment();
+        const position = if (self.vertical) y else x;
+        const length: f64 = @floatFromInt(if (self.vertical) self.scroll.as(gtk.Widget).getHeight() else self.scroll.as(gtk.Widget).getWidth());
+        const delta: f64 = if (position < 24) -20 else if (position > length - 24) 20 else 0;
         adjustment.setValue(std.math.clamp(adjustment.getValue() + delta, 0, @max(0, adjustment.getUpper() - adjustment.getPageSize())));
         self.clearDrop();
-        const slot = self.dropSlot(x);
+        const slot = self.dropSlot(x, y);
         var child = self.box.as(gtk.Widget).getFirstChild();
         var index: usize = 0;
         while (child) |widget| : (index += 1) {
@@ -294,13 +318,17 @@ pub const State = struct {
         }
     }
 
-    fn dropSlot(self: *State, x: f64) usize {
+    fn dropSlot(self: *State, x: f64, y: f64) usize {
         var child = self.box.as(gtk.Widget).getFirstChild();
         var index: usize = 0;
         while (child) |widget| : (index += 1) {
             child = widget.getNextSibling();
             var bounds: graphene.Rect = undefined;
             if (widget.computeBounds(self.scroll.as(gtk.Widget), &bounds) != 0) {
+                if (self.vertical) {
+                    if (y < bounds.f_origin.f_y + bounds.f_size.f_height / 2) return index;
+                    continue;
+                }
                 const middle = bounds.f_origin.f_x + bounds.f_size.f_width / 2;
                 if (if (self.box.as(gtk.Widget).getDirection() == .rtl) x > middle else x < middle) return index;
             }
@@ -308,13 +336,13 @@ pub const State = struct {
         return index;
     }
 
-    fn dropped(_: *gtk.DropTarget, value: *gobject.Value, x: f64, _: f64, self: *State) callconv(.c) c_int {
+    fn dropped(_: *gtk.DropTarget, value: *gobject.Value, x: f64, y: f64, self: *State) callconv(.c) c_int {
         self.clearDrop();
         const page = gobject.ext.cast(adw.TabPage, value.getObject() orelse return 0) orelse return 0;
         const source = pageView(page) orelse return 0;
         const target = self.view orelse return 0;
         const count: usize = @intCast(target.getNPages());
-        const slot = self.dropSlot(x);
+        const slot = self.dropSlot(x, y);
         const position = layout.dropPosition(count, @intCast(target.getNPinnedPages()), page.getPinned() != 0, if (source == target) @intCast(source.getPagePosition(page)) else null, slot);
         // Moving the last page may dispose the source window. Do not access
         // source strip state after handing the page back to AdwTabView.
@@ -357,6 +385,7 @@ const Chip = extern struct {
         attention: bool = false,
         pulse_timer: ?c_uint = null,
         indicator: *gtk.Image = undefined,
+        icon: *gtk.Image = undefined,
         popover: ?*gtk.PopoverMenu = null,
         menu_view: ?*adw.TabView = null,
     };
@@ -373,6 +402,10 @@ const Chip = extern struct {
         priv.select.as(gtk.Widget).addCssClass("compact-tab-select");
         priv.select.as(gtk.Widget).setFocusOnClick(0);
         const content = gtk.Box.new(.horizontal, 6);
+        priv.icon = gtk.Image.new();
+        priv.icon.setPixelSize(20);
+        priv.icon.as(gtk.Widget).addCssClass("compact-tab-icon");
+        content.append(priv.icon.as(gtk.Widget));
         priv.indicator = gtk.Image.newFromIconName("dialog-information-symbolic");
         priv.indicator.setPixelSize(12);
         content.append(priv.indicator.as(gtk.Widget));
@@ -418,7 +451,15 @@ const Chip = extern struct {
     fn refresh(self: *Self) void {
         const priv = self.private();
         const page = priv.page orelse return;
-        priv.label.setLabel(page.getTitle());
+        {
+            const alloc = Application.default().allocator();
+            const keyword = if (page.getKeyword()) |v| std.mem.span(v) else "";
+            const markup = program_icon.labelMarkup(alloc, keyword, std.mem.span(page.getTitle())) catch null;
+            defer if (markup) |v| alloc.free(v);
+            if (markup) |v| priv.label.setMarkup(v) else priv.label.setLabel(page.getTitle());
+        }
+        if (page.getIcon()) |icon| priv.icon.setFromGicon(icon);
+        priv.icon.as(gtk.Widget).setVisible(@intFromBool(page.getIcon() != null));
 
         priv.select.setActive(page.getSelected());
         if (page.getSelected() != 0) self.as(gtk.Widget).addCssClass("selected") else self.as(gtk.Widget).removeCssClass("selected");
@@ -569,8 +610,8 @@ const Chip = extern struct {
                 self.popup(0, @floatFromInt(self.as(gtk.Widget).getHeight()));
                 return 1;
             },
-            gdk.KEY_Left => @mod(position - 1, count),
-            gdk.KEY_Right => @mod(position + 1, count),
+            gdk.KEY_Left, gdk.KEY_Up => @mod(position - 1, count),
+            gdk.KEY_Right, gdk.KEY_Down => @mod(position + 1, count),
             gdk.KEY_Home => 0,
             gdk.KEY_End => count - 1,
             gdk.KEY_Delete => {

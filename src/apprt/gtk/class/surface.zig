@@ -27,6 +27,7 @@ const ApprtSurface = @import("../Surface.zig");
 const Common = @import("../class.zig").Common;
 const Application = @import("application.zig").Application;
 const session_relaunch = @import("../session_relaunch.zig");
+const program_icon = @import("../program_icon.zig");
 const Config = @import("config.zig").Config;
 const ResizeOverlay = @import("resize_overlay.zig").ResizeOverlay;
 const SearchOverlay = @import("search_overlay.zig").SearchOverlay;
@@ -67,6 +68,38 @@ pub const Surface = extern struct {
     pub const Tree = datastruct.SplitTree(Self);
 
     pub const properties = struct {
+        /// The program in the foreground, as a `program_icon.Program` value.
+        /// Pane headers and tabs show its icon.
+        /// The executable name of the program in the foreground, or null.
+        /// Tabs and pane headers show it in bold before the title.
+        pub const @"program-name" = struct {
+            pub const name = "program-name";
+            const impl = gobject.ext.defineProperty(
+                name,
+                Self,
+                ?[:0]const u8,
+                .{
+                    .default = null,
+                    .accessor = C.privateStringFieldAccessor("program_name"),
+                },
+            );
+        };
+
+        pub const program = struct {
+            pub const name = "program";
+            const impl = gobject.ext.defineProperty(
+                name,
+                Self,
+                c_uint,
+                .{
+                    .default = 0,
+                    .minimum = 0,
+                    .maximum = std.math.maxInt(c_uint),
+                    .accessor = C.privateShallowFieldAccessor("program"),
+                },
+            );
+        };
+
         /// This property is set to true when the bell is ringing. Note that
         /// this property will only emit a changed signal when there is a
         /// full state change. If a bell is ringing and another bell event
@@ -692,6 +725,13 @@ pub const Surface = extern struct {
         // true) under various scenarios, but can also manually be set to
         // false by a parent widget.
         bell_ringing: bool = false,
+
+        /// The foreground program, and the timer that checks it while the
+        /// surface is realized. Programs do not always change the title, so
+        /// the title alone does not show when a program starts or exits.
+        program: c_uint = 0,
+        program_name: ?[:0]const u8 = null,
+        program_timer: ?c_uint = null,
 
         /// True if this surface is in an error state. This is currently
         /// a simple boolean with no additional information on WHAT the
@@ -1953,6 +1993,7 @@ pub const Surface = extern struct {
             self.emitLuaEvent(.surface_closed, null);
         }
         self.cancelSessionRelaunch();
+        self.stopProgramTimer();
         if (Application.default().picker()) |service| service.cancelSurface(self, "pane_closed");
         const priv = self.private();
 
@@ -2047,6 +2088,10 @@ pub const Surface = extern struct {
         if (priv.mouse_hover_url) |v| {
             glib.free(@ptrCast(@constCast(v)));
             priv.mouse_hover_url = null;
+        }
+        if (priv.program_name) |v| {
+            glib.free(@ptrCast(@constCast(v)));
+            priv.program_name = null;
         }
         if (priv.default_size) |v| {
             ext.boxedFree(Size, v);
@@ -2228,6 +2273,35 @@ pub const Surface = extern struct {
         if (priv.session_id == 0)
             priv.session_id = @import("../session.zig").newId(@import("../../../global.zig").io());
         return priv.session_id;
+    }
+
+    fn checkProgram(ud: ?*anyopaque) callconv(.c) c_int {
+        const self: *Self = @ptrCast(@alignCast(ud orelse return 0));
+        const priv = self.private();
+        var buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+        const name: []const u8 = name: {
+            const surface = self.core() orelse break :name "";
+            const pid = surface.getProcessInfo(.foreground_pid) orelse break :name "";
+            break :name program_icon.processName(global.io(), pid, &buf) orelse "";
+        };
+        if (std.mem.eql(u8, name, priv.program_name orelse "")) return 1;
+
+        if (priv.program_name) |v| glib.free(@ptrCast(@constCast(v)));
+        priv.program_name = if (name.len > 0) glib.ext.dupeZ(u8, name) else null;
+        self.as(gobject.Object).notifyByPspec(properties.@"program-name".impl.param_spec);
+
+        const program: c_uint = @backingInt(program_icon.Program.fromName(name));
+        if (program != priv.program) {
+            priv.program = program;
+            self.as(gobject.Object).notifyByPspec(properties.program.impl.param_spec);
+        }
+        return 1;
+    }
+
+    fn stopProgramTimer(self: *Self) void {
+        const priv = self.private();
+        if (priv.program_timer) |id| _ = glib.Source.remove(id);
+        priv.program_timer = null;
     }
 
     pub fn captureSessionRelaunch(self: *Self, alloc: Allocator) !?session_relaunch.Record {
@@ -2548,6 +2622,14 @@ pub const Surface = extern struct {
 
     pub fn getBellRinging(self: *Self) bool {
         return self.private().bell_ringing;
+    }
+
+    pub fn getProgramName(self: *Self) ?[:0]const u8 {
+        return self.private().program_name;
+    }
+
+    pub fn getProgram(self: *Self) program_icon.Program {
+        return std.enums.fromInt(program_icon.Program, self.private().program) orelse .terminal;
     }
 
     pub fn setBellRinging(self: *Self, ringing: bool) void {
@@ -3642,6 +3724,11 @@ pub const Surface = extern struct {
         // create a strong reference back to ourself and we want to be
         // able to release that in unrealize.
         priv.im_context.as(gtk.IMContext).setClientWidget(self.as(gtk.Widget));
+
+        if (priv.program_timer == null) {
+            _ = checkProgram(self);
+            priv.program_timer = glib.timeoutAdd(1500, checkProgram, self);
+        }
     }
 
     fn renderSurfaceUnrealize(
@@ -3657,6 +3744,7 @@ pub const Surface = extern struct {
 
         // Unset our input method
         priv.im_context.as(gtk.IMContext).setClientWidget(null);
+        self.stopProgramTimer();
     }
 
     fn renderSurfaceMap(
@@ -3981,6 +4069,17 @@ pub const Surface = extern struct {
         return @intFromBool(shown);
     }
 
+    /// Pane headers replace the drag handle while they are shown. The
+    /// handle's visibility is a template binding, so hide it by other means.
+    pub fn setDragHandleEnabled(self: *Self, enabled: bool) void {
+        const handle = self.private().drag_handle;
+        handle.setCanTarget(@intFromBool(enabled));
+        if (enabled) handle.removeCssClass("replaced") else handle.addCssClass("replaced");
+    }
+
+    pub const dragPrepare = surfaceDragPrepare;
+    pub const dragBegin = surfaceDragBegin;
+
     fn surfaceDragPrepare(
         src: *gtk.DragSource,
         x: f64,
@@ -4233,6 +4332,8 @@ pub const Surface = extern struct {
             // Properties
             gobject.ext.registerProperties(class, &.{
                 properties.@"bell-ringing".impl,
+                properties.program.impl,
+                properties.@"program-name".impl,
                 properties.config.impl,
                 properties.@"child-exited".impl,
                 properties.@"default-size".impl,

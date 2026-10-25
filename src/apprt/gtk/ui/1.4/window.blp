@@ -14,6 +14,7 @@ template $GhosttyWindow: Adw.ApplicationWindow {
   notify::maximized => $notify_maximized();
   notify::quick-terminal => $notify_quick_terminal();
   notify::scale-factor => $notify_scale_factor();
+  notify::toolbar-visible => $notify_toolbar_visible();
   default-width: 800;
   default-height: 600;
   // GTK4 grabs F10 input by default to focus the menubar icon. We want
@@ -121,16 +122,27 @@ template $GhosttyWindow: Adw.ApplicationWindow {
               child: Gtk.Box {
                 Gtk.Image session_icon {
                   styles ["dim-label"]
-                  pixel-size: 17;
+                  icon-name: "ghostty-session-symbolic";
+                  pixel-size: 18;
                 }
-                // Always visible; long names remain bounded and ellipsized.
-                Gtk.Label session_label {
-                  styles ["dim-label", "session-name"]
-                  label: bind template.session-name;
+                Gtk.Box {
+                  orientation: vertical;
                   margin-start: 9;
-                  ellipsize: end;
-                  xalign: 0;
-                  max-width-chars: bind $session_name_width(template.tabs-compact) as <int>;
+                  valign: center;
+                  // Always visible; long names remain bounded and ellipsized.
+                  Gtk.Label session_label {
+                    styles ["dim-label", "session-name"]
+                    label: bind template.session-name;
+                    ellipsize: end;
+                    xalign: 0;
+                    max-width-chars: bind $session_name_width(template.tabs-compact) as <int>;
+                  }
+                  Gtk.Label {
+                    styles ["session-state"]
+                    label: _("unsaved");
+                    xalign: 0;
+                    visible: bind template.session-saved inverted;
+                  }
                 }
               };
             }
@@ -168,7 +180,8 @@ template $GhosttyWindow: Adw.ApplicationWindow {
               hscroll-policy: natural;
               Gtk.Box compact_tab_box {
                 styles ["compact-tab-box"]
-                spacing: 4;
+                spacing: 0;
+                valign: center;
                 halign: start;
               }
             }
@@ -185,6 +198,34 @@ template $GhosttyWindow: Adw.ApplicationWindow {
               single-line-mode: true;
               xalign: 1;
               max-width-chars: 48;
+            }
+
+            // Compact tabs hide the native controls; these two remain.
+            Gtk.Box {
+              styles ["compact-window-tools"]
+              orientation: horizontal;
+              valign: center;
+              visible: bind template.tabs-compact;
+
+              Gtk.Button {
+                styles ["flat"]
+                action-name: "win.toggle-command-palette";
+                tooltip-text: _("Command Palette");
+                can-focus: false;
+                focus-on-click: false;
+                child: Gtk.Label {
+                  label: "⌘";
+                };
+              }
+
+              Gtk.Button {
+                styles ["flat"]
+                action-name: "win.new-tab";
+                icon-name: "list-add-symbolic";
+                tooltip-text: _("New Tab");
+                can-focus: false;
+                focus-on-click: false;
+              }
             }
 
             Gtk.Box {
@@ -218,23 +259,112 @@ template $GhosttyWindow: Adw.ApplicationWindow {
       }
 
       Box {
-        orientation: vertical;
+        orientation: horizontal;
 
-        $GhosttyDebugWarning {
-          visible: bind template.debug;
+        // gtk-tabs-location = left: the tabs are a list at the side, with no
+        // tab bar at the top. It shows and hides with the toolbars.
+        Gtk.Box side_panel {
+          styles ["tab-side"]
+          orientation: vertical;
+          width-request: 260;
+          // Children expand inside the column; the column keeps its width.
+          hexpand: false;
+          visible: bind $side_panel_visible(template.config, template.toolbar-visible) as <bool>;
+
+          Gtk.WindowHandle {
+            Gtk.Box {
+              styles ["tab-side-head"]
+              orientation: horizontal;
+
+              Gtk.Button {
+                styles ["flat"]
+                icon-name: "ghostty-sidebar-symbolic";
+                action-name: "win.toggle-toolbar";
+                tooltip-text: _("Hide Tabs");
+                valign: center;
+                can-focus: false;
+                focus-on-click: false;
+              }
+
+              Gtk.Box {
+                hexpand: true;
+              }
+
+              Gtk.Button {
+                styles ["flat"]
+                action-name: "win.toggle-command-palette";
+                tooltip-text: _("Command Palette");
+                valign: center;
+                can-focus: false;
+                focus-on-click: false;
+                child: Gtk.Label {
+                  label: "⌘";
+                };
+              }
+
+              Gtk.Button {
+                styles ["flat"]
+                action-name: "win.new-tab";
+                icon-name: "list-add-symbolic";
+                tooltip-text: _("New Tab");
+                valign: center;
+                can-focus: false;
+                focus-on-click: false;
+              }
+            }
+          }
+
+          Gtk.Button {
+            styles ["flat", "tab-side-session"]
+            halign: start;
+            visible: bind template.session-enabled;
+            action-name: "win.switch-session";
+            tooltip-text: bind template.session-name;
+            focus-on-click: false;
+            child: Gtk.Label {
+              label: bind template.session-name;
+              ellipsize: end;
+              xalign: 0;
+            };
+          }
+
+          Gtk.ScrolledWindow side_tab_scroll {
+            styles ["compact-tab-scroll"]
+            vexpand: true;
+            hscrollbar-policy: never;
+            vscrollbar-policy: automatic;
+            Gtk.Viewport {
+              vscroll-policy: natural;
+              Gtk.Box side_tab_box {
+                styles ["side-tab-box"]
+                orientation: vertical;
+                spacing: 3;
+                valign: start;
+              }
+            }
+          }
         }
 
-        Adw.ToastOverlay toast_overlay {
-          Adw.TabView tab_view {
-            notify::n-pages => $notify_n_pages();
-            notify::selected-page => $notify_selected_page();
-            close-page => $close_page();
-            page-attached => $page_attached();
-            page-detached => $page_detached();
-            create-window => $tab_create_window();
-            setup-menu => $setup_tab_menu();
-            menu-model: tab_context_menu;
-            shortcuts: none;
+        Box {
+          orientation: vertical;
+          hexpand: true;
+
+          $GhosttyDebugWarning {
+            visible: bind template.debug;
+          }
+
+          Adw.ToastOverlay toast_overlay {
+            Adw.TabView tab_view {
+              notify::n-pages => $notify_n_pages();
+              notify::selected-page => $notify_selected_page();
+              close-page => $close_page();
+              page-attached => $page_attached();
+              page-detached => $page_detached();
+              create-window => $tab_create_window();
+              setup-menu => $setup_tab_menu();
+              menu-model: tab_context_menu;
+              shortcuts: none;
+            }
           }
         }
       }
