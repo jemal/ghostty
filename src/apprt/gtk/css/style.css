@@ -617,16 +617,18 @@ dialog.command-palette shortcut > label.keycap {
  * only by dimming the other panes (unfocused-split-opacity and the headers). */
 .decorated-pane {
   margin: 5px;
-  border: 1px solid color-mix(in srgb, currentColor 6%, transparent);
+  border: 1px solid var(--ghostty-pane-border, color-mix(in srgb, currentColor 6%, transparent));
   border-radius: 12px;
+  box-shadow: var(--ghostty-pane-shadow, none);
   background: var(--view-bg-color);
   color: var(--view-fg-color);
 }
 
 .pane-stack {
   margin: 5px;
-  border: 1px solid color-mix(in srgb, currentColor 6%, transparent);
+  border: 1px solid var(--ghostty-pane-border, color-mix(in srgb, currentColor 6%, transparent));
   border-radius: 12px;
+  box-shadow: var(--ghostty-pane-shadow, none);
   background: var(--view-bg-color);
   color: var(--view-fg-color);
 }

@@ -79,9 +79,11 @@
   .tools svg { width:18px; height:18px; }
 
   /* Panes: rounded cards on the window background, with gaps between them. */
-  .workspace { flex:1; min-height:0; display:grid; grid-template-rows:2.1fr 1fr; gap:var(--gap); padding:0 var(--gap) var(--gap); }
-  .row { display:grid; gap:var(--gap); min-height:0; }
-  .row.top { grid-template-columns:1.65fr 1fr; } .row.bottom { grid-template-columns:1.1fr 1fr; }
+  /* Splits are nested boxes, so that panes can split and close in the draft. */
+  .workspace { flex:1; min-height:0; display:flex; flex-direction:column; gap:var(--gap); padding:0 var(--gap) var(--gap); }
+  .split { display:flex; gap:var(--gap); min-width:0; min-height:0; }
+  .split.h { flex-direction:row; } .split.v { flex-direction:column; }
+  .workspace > *, .split > * { flex:1 1 0; }
   .pane { position:relative; min-width:0; min-height:0; display:flex; flex-direction:column; background:var(--pane); border:1px solid var(--pane-line); border-radius:var(--radius); box-shadow:var(--pane-shadow); overflow:hidden; outline:none; }
   /* Rex marks focus only by dimming the other panes. The pane background stays. */
   body.focus-dim .pane:not(.active) .pane-head, body.focus-dim .pane:not(.active) .term { opacity:var(--dim, .55); transition:opacity .15s; }
@@ -118,6 +120,9 @@
   .pane-head .actions button { width:26px; height:24px; display:grid; place-items:center; border-radius:6px; color:var(--muted); }
   .pane-head .actions button:hover { background:var(--divider); color:var(--text); }
   .pane.zoomed { position:absolute; inset:0 var(--gap) var(--gap); z-index:3; }
+  body.tabs-hidden .pane.zoomed { top:var(--gap); }
+  /* A closing pane: a picture of it that shrinks while its neighbour grows. */
+  .pane.ghost { position:absolute; z-index:4; pointer-events:none; margin:0; }
   .workspace { position:relative; }
 
   .term { flex:1; min-height:0; overflow:hidden; padding:2px 14px 12px; font:13px/1.45 "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace; white-space:pre; }
@@ -133,6 +138,7 @@
   .window { position:relative; }
   .palette { position:absolute; z-index:10; top:70px; left:50%; transform:translateX(-50%); width:min(420px, calc(100% - 32px)); display:flex; flex-direction:column; background:color-mix(in srgb, var(--text) 5%, var(--pane)); border:1px solid var(--tab-sel-line); border-radius:12px; box-shadow:0 18px 50px #0007; overflow:hidden; }
   body.light .palette { background:#fff; box-shadow:0 18px 50px #0002; }
+  .palette[hidden] { display:none; }
   .palette-search { display:flex; align-items:center; gap:8px; margin:8px; padding:0 10px; height:36px; border-radius:8px; background:var(--track); color:var(--muted); }
   .palette-search input { flex:1; min-width:0; background:none; border:0; outline:none; color:var(--text); font:inherit; font-size:14px; }
   .palette-list { max-height:420px; overflow:auto; padding:0 6px 6px; }
@@ -147,6 +153,33 @@
   .palette-foot { display:flex; justify-content:flex-end; gap:14px; padding:8px 12px; border-top:1px solid var(--divider); color:var(--muted); font-size:12px; }
   .palette-foot kbd { margin-left:6px; padding:1px 5px; border:1px solid var(--divider); border-radius:4px; font:inherit; }
 
+  /* A pane after some output: the prompt is at the bottom and older lines go out at the top. */
+  .term.at-bottom { display:flex; flex-direction:column; justify-content:flex-end; }
+
+  /* Path picker: a card at the terminal cursor. Above the cursor, the search box is at the
+     bottom and the list grows up, so the best match is next to the search box. */
+  .picker { position:absolute; z-index:10; display:flex; flex-direction:column; background:color-mix(in srgb, var(--text) 5%, var(--pane)); border:1px solid var(--tab-sel-line); border-radius:12px; box-shadow:0 18px 50px #0007; overflow:hidden; }
+  body.light .picker { background:#fff; box-shadow:0 18px 50px #0002; }
+  .picker[hidden] { display:none; }
+  /* The list is first in the page; below the cursor the search box goes on top. */
+  .picker:not(.above) { flex-direction:column-reverse; }
+  .picker-list { overflow:auto; padding:6px 6px 0; display:flex; flex-direction:column; }
+  .picker.above .picker-list { flex-direction:column-reverse; padding:6px 6px 0; }
+  .picker:not(.above) .picker-list { padding:0 6px 6px; }
+  .picker-search { display:flex; align-items:center; gap:8px; flex:none; margin:6px; padding:0 10px; height:32px; border-radius:8px; background:var(--track); color:var(--muted); }
+  .picker-search input { flex:1; min-width:0; background:none; border:0; outline:none; color:var(--text); font:13px "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace; }
+  .picker-item { display:flex; align-items:center; gap:9px; width:100%; height:28px; flex:none; padding:0 8px; border-radius:7px; font-size:14px; text-align:left; }
+  .picker-item.selected { background:color-mix(in srgb, var(--accent) 38%, transparent); }
+  .picker-item .name { flex:1; min-width:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+  .picker-item .name b { font-weight:600; color:var(--accent); }
+  .picker-item.selected .name b { color:inherit; text-decoration:underline; text-underline-offset:2px; }
+  .picker-item .kind svg { width:16px; height:16px; }
+  .picker-item .kind.dir svg { fill:var(--t-blue); stroke:var(--t-blue); stroke-width:1; }
+  .picker-item .kind.file svg { color:var(--muted); }
+  .picker-item .recent { color:var(--muted); }
+  .picker-item .recent svg { width:14px; height:14px; }
+  .picker-empty { padding:10px; color:var(--muted); font-size:13px; }
+
   .controls { display:flex; flex-wrap:wrap; gap:20px; align-items:center; padding:18px 2px 6px; color:#c8c8cc; font-size:13px; }
   body.light .controls, body.light .note { color:#3a3a3e; }
   .controls label { display:flex; align-items:center; gap:8px; }
@@ -154,7 +187,7 @@
   .note { color:#9a9aa0; font-size:12.5px; margin:4px 2px 0; max-width:900px; line-height:1.5; }
   @media (max-width:860px) {
     .study { padding:12px; } .tools .status, .session-text small { display:none; }
-    .row.top, .row.bottom { grid-template-columns:1fr; } .workspace { grid-template-rows:1fr 1fr; } .row.bottom .pane:last-child, .row.top .pane:last-child { display:none; }
+    .split.h { flex-direction:column; }
   }
 </style>
 <body class="focus-dim actions-faint tabs-hidden side-open">
@@ -184,8 +217,8 @@
       <div class="side-list" role="tablist" aria-label="Tabs"></div>
     </aside>
     <div class="workspace">
-      <div class="row top">
-        <section class="pane active" data-app="hx" tabindex="0">
+      <div class="split h" style="flex:2.1 1 0">
+        <section class="pane active" data-app="hx" tabindex="0" style="flex:1.65 1 0">
           <div class="pane-head"><span class="lead"><button class="side-toggle" title="Show tabs" aria-label="Show tabs"><svg viewBox="0 0 16 16"><rect x="2.5" y="3" width="11" height="10" rx="1.5"/><path d="M6 3v10"/></svg></button></span><svg viewBox="0 0 16 16"><path d="M3 4.5 6 7.5 3 10.5M8 11.5h5"/></svg><span class="title"><b>hx</b> ~/dev/projects/ghostty</span></div>
           <div class="term"><span class="ln">212</span><span class="d i">// Pane headers follow the window font, not the terminal font.</span>
 <span class="ln">213</span><span class="b">.pane-header</span> {
@@ -203,7 +236,7 @@
 <span class="ln">226</span>  <span class="c">color</span>: <span class="r">alpha</span>(<span class="r">@view_fg_color</span>, <span class="y">0.55</span>);
 <span class="ln">227</span>}
 <span class="ln">228</span>
-<div class="modeline"><span class="mode">NOR</span><span>src/apprt/gtk/css/style.css</span><span class="d" style="margin-left:auto">css  216:3</span></div></div>
+<div class="modeline"><span class="mode">NOR</span><span>src/apprt/gtk/css/style.css</span><span class="d" style="margin-left:auto">css  216:3</span></div><div>:e <span class="cursor"></span></div></div>
         </section>
         <section class="pane" data-app="claude" tabindex="0">
           <div class="pane-head"><svg viewBox="0 0 16 16"><path d="M8 2.5v11M2.5 8h11M4.1 4.1l7.8 7.8M11.9 4.1l-7.8 7.8"/></svg><span class="title"><b>claude</b> ~/dev/projects/ghostty</span></div>
@@ -228,8 +261,8 @@
   <span class="d">? for shortcuts</span></div>
         </section>
       </div>
-      <div class="row bottom">
-        <section class="pane" data-app="zig" tabindex="0">
+      <div class="split h">
+        <section class="pane" data-app="zig" tabindex="0" style="flex:1.1 1 0">
           <div class="pane-head"><svg viewBox="0 0 16 16"><path d="M3 4.5 6 7.5 3 10.5M8 11.5h5"/></svg><span class="title"><b>zig</b> ~/dev/projects/ghostty</span></div>
           <div class="term"><span class="b">❯</span> nix develop -c zig build
 <span class="d">install</span>
@@ -241,11 +274,21 @@ Build Summary: <span class="g">42/42 steps succeeded</span>
         </section>
         <section class="pane" data-app="nu" tabindex="0">
           <div class="pane-head"><svg viewBox="0 0 16 16"><path d="M3 4.5 6 7.5 3 10.5M8 11.5h5"/></svg><span class="title"><b>nu</b> ~/dev/projects/ghostty</span></div>
-          <div class="term"><span class="b">ghostty</span> <span class="d">on</span> <span class="y">vyuuvvwy</span> <span class="d">via ❄️ ghostty-env</span>
+          <div class="term at-bottom"><div><span class="b">ghostty</span> <span class="d">on</span> <span class="y">vyuuvvwy</span> <span class="d">via ❄️ ghostty-env</span>
 <span class="b">❯</span> jj status
 The working copy has no changes.
 Working copy  (@) : <span class="y">qzyxxpqy</span> <span class="b">be79660f</span> <span class="g">(empty)</span>
-<span class="b">❯</span> <span class="cursor"></span></div>
+<span class="b">❯</span> ls
+<span class="d">╭───┬────────────────┬──────┬─────────╮</span>
+<span class="d">│</span> <span class="g">#</span> <span class="d">│</span>      <span class="g">name</span>      <span class="d">│</span> <span class="g">type</span> <span class="d">│</span>  <span class="g">size</span>   <span class="d">│</span>
+<span class="d">├───┼────────────────┼──────┼─────────┤</span>
+<span class="d">│</span> 0 <span class="d">│</span> AGENTS.md      <span class="d">│</span> file <span class="d">│</span>  1.9 KB <span class="d">│</span>
+<span class="d">│</span> 1 <span class="d">│</span> FORK_STATUS.md <span class="d">│</span> file <span class="d">│</span> 71.7 KB <span class="d">│</span>
+<span class="d">│</span> 2 <span class="d">│</span> <span class="c">design</span>         <span class="d">│</span> dir  <span class="d">│</span>    96 B <span class="d">│</span>
+<span class="d">│</span> 3 <span class="d">│</span> <span class="c">src</span>            <span class="d">│</span> dir  <span class="d">│</span>  1.2 KB <span class="d">│</span>
+<span class="d">╰───┴────────────────┴──────┴─────────╯</span>
+<span class="b">ghostty</span> <span class="d">on</span> <span class="y">vyuuvvwy</span> <span class="d">via ❄️ ghostty-env</span>
+<span class="b">❯</span> hx <span class="cursor"></span></div></div>
         </section>
       </div>
     </div>
@@ -254,6 +297,10 @@ Working copy  (@) : <span class="y">qzyxxpqy</span> <span class="b">be79660f</sp
       <label class="palette-search"><svg viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 14 14"/></svg><input id="palette-input" placeholder="Search commands…" autocomplete="off" aria-label="Search commands"></label>
       <div class="palette-list" role="listbox"></div>
       <div class="palette-foot"><span>Run<kbd>↵</kbd></span><span>Close<kbd>Esc</kbd></span></div>
+    </div>
+    <div class="picker" role="dialog" aria-label="Insert path" hidden>
+      <div class="picker-list" role="listbox"></div>
+      <label class="picker-search"><svg viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 14 14"/></svg><input id="picker-input" autocomplete="off" spellcheck="false" aria-label="Path"></label>
     </div>
   </section>
 
@@ -265,8 +312,12 @@ Working copy  (@) : <span class="y">qzyxxpqy</span> <span class="b">be79660f</sp
     <label>Pane buttons <select id="actions"><option value="actions-faint">Always, faint</option><option value="">Hover only</option></select></label>
     <label>Gaps and corners <select id="spacing"><option value="">Rex · 10 px gaps, 12 px corners</option><option value="spacing-current">Current GTK · 6 px gaps, 8 px corners</option></select></label>
     <label><input type="checkbox" id="status" checked> Lua status</label>
+    <button type="button" id="try-picker" style="color:inherit;border:1px solid #3a3a40;border-radius:6px;padding:5px 10px">Open the path picker in nu</button>
+    <label>Pane motion <input type="range" id="speed" min="0" max="500" step="10" value="200"><output id="speed-value">200 ms</output></label>
+    <label>Curve <select id="curve"><option value="cubic-bezier(.2,.8,.2,1)">Ease out</option><option value="cubic-bezier(.3,1.25,.5,1)">Small spring</option><option value="cubic-bezier(.4,0,.2,1)">Standard</option><option value="linear">Linear</option></select></label>
   </form>
-  <p class="note">Rex marks the focused pane only by dimming the other panes; “Dim” sets how visible the other panes stay. Vertical mode has no top bar. The sidebar button (in the side list, or at the left of the first pane header) and Ctrl+Shift+B show or hide the side list. The ⌘ button opens the command palette: type to filter, ↑ ↓ to move, Enter or Escape to close. Click a tab or a pane to select it. The tab shows the app icon, then one bar for each pane in the tab (a green bar is the focused pane). Long tab labels fade out instead of showing “…”. A dot is the existing attention marker; hover shows the close button. The pane buttons are split right, split down, zoom and close; zoom works in this draft. Rex's eye button is not included because Ghostty has no matching action.</p>
+  <p class="note">Pane motion: the buttons in a pane header split right, split down, zoom and close, and Alt+D (split right), Alt+E (split down), Alt+Z and Alt+W do the same for the focused pane. During the motion the pane content stretches, because in GTK it will be a picture of the terminal; the real terminal takes its final size when the motion ends. 0 ms turns the motion off. Rex marks the focused pane only by dimming the other panes; “Dim” sets how visible the other panes stay. Vertical mode has no top bar. The sidebar button (in the side list, or at the left of the first pane header) and Ctrl+Shift+B show or hide the side list. The ⌘ button opens the command palette: type to filter, ↑ ↓ to move, Enter or Escape to close. Click a tab or a pane to select it. The tab shows the app icon, then one bar for each pane in the tab (a green bar is the focused pane). Long tab labels fade out instead of showing “…”. A dot is the existing attention marker; hover shows the close button. The pane buttons are split right, split down, zoom and close; zoom works in this draft. Rex's eye button is not included because Ghostty has no matching action.</p>
+  <p class="note">Path picker: Super+I (or “Insert Path…” in the command palette, or the button above) opens a card at the cursor of the focused pane. The search box starts with the pane's folder. The list shows the files and folders in the typed folder, one level at a time; hidden files show when you type a “.”. Rows with a clock are recent paths: folders that a pane was in (from OSC 7) and paths picked here before. Above the cursor, the best match is at the bottom, next to the search box; with no room above, the card opens below and the order turns over. Type to filter (the letters in order, not next to each other), ↑ ↓ to move, Tab to go into a folder, Shift+Tab to go up one folder, Enter to put the path at the cursor, Escape to close. Super+I opens the card in every pane, for example after “:e ” in hx. Super+I again closes it. A path inside the pane's folder is put in relative to it. At a shell prompt, a name that starts with “-” gets “./” in front and special characters are quoted; in other programs (hx, claude, codex) the path is plain text. A space is added when the cursor is right after other text. Typing “~/” or “/” after a folder starts the path again. When fewer than 3 rows fit in the pane, the card opens in the middle of the window. A path with a space or another special character is put in single quotes, with the full home folder in place of “~” (try Downloads › Screenshot 2026-10-26.png).</p>
 </main>
 <script>
   const $ = s => document.querySelector(s);
@@ -281,10 +332,6 @@ Working copy  (@) : <span class="y">qzyxxpqy</span> <span class="b">be79660f</sp
   };
   const glyph = app => `<svg viewBox="0 0 16 16">${(apps[app] || apps.terminal)[1]}</svg>`;
   const tile = app => `<span class="app-icon" style="--app:${(apps[app] || apps.terminal)[0]}">${glyph(app)}</span>`;
-  document.querySelectorAll('.pane').forEach(pane => {
-    const app = pane.dataset.app;
-    pane.querySelector('.pane-head > svg').outerHTML = `<span class="pane-icon" style="--app:${apps[app] ? apps[app][0] : 'var(--muted)'}">${glyph(app)}</span>`;
-  });
 
   const tabs = [
     { app: 'hx', path: '~/dev/projects/ghostty', others: ['claude', 'zig', 'nu'] },
@@ -335,19 +382,122 @@ Working copy  (@) : <span class="y">qzyxxpqy</span> <span class="b">be79660f</sp
     ['Zoom', '<svg viewBox="0 0 16 16"><path d="M9.5 3h3.5v3.5M13 3 9 7M6.5 13H3V9.5M3 13l4-4"/></svg>'],
     ['Close', '<svg viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></svg>'],
   ];
-  document.querySelectorAll('.pane').forEach(pane => {
+  const setActive = pane => document.querySelectorAll('.pane').forEach(p => p.classList.toggle('active', p === pane));
+  function setupPane(pane) {
+    const app = pane.dataset.app;
+    pane.querySelector('.pane-head > svg').outerHTML = `<span class="pane-icon" style="--app:${apps[app] ? apps[app][0] : 'var(--muted)'}">${glyph(app)}</span>`;
     const actions = document.createElement('span');
     actions.className = 'actions';
+    const handlers = { 'Split right': () => splitPane(pane, 'h'), 'Split down': () => splitPane(pane, 'v'), 'Zoom': () => zoomPane(pane), 'Close': () => closePane(pane) };
     actionIcons.forEach(([name, svg]) => {
       const button = document.createElement('button');
       button.type = 'button'; button.title = name; button.setAttribute('aria-label', name); button.innerHTML = svg;
-      if (name === 'Zoom') button.addEventListener('click', () => pane.classList.toggle('zoomed'));
+      button.addEventListener('click', event => { event.stopPropagation(); handlers[name](); });
       actions.append(button);
     });
     pane.querySelector('.pane-head').append(actions);
-    const focus = () => document.querySelectorAll('.pane').forEach(p => p.classList.toggle('active', p === pane));
-    pane.addEventListener('pointerdown', focus);
-    pane.addEventListener('focusin', focus);
+    pane.addEventListener('pointerdown', () => setActive(pane));
+    pane.addEventListener('focusin', () => setActive(pane));
+  }
+  document.querySelectorAll('.pane').forEach(setupPane);
+
+  // Pane motion, the way GTK will do it: each pane is a picture that moves
+  // and scales from its old place to its new place, then the real terminal
+  // takes its final size once. Measure, change the layout, then start every
+  // pane at its old place and let it move to the new one.
+  const motion = { duration: 200, easing: 'cubic-bezier(.2,.8,.2,1)' };
+  const reduced = () => motion.duration === 0 || matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const box = rect => ({ left: rect.left, top: rect.top, width: Math.max(rect.width, 1), height: Math.max(rect.height, 1) });
+  function moveFrom(pane, from) {
+    const to = pane.getBoundingClientRect();
+    pane.animate([
+      { transformOrigin: '0 0', transform: `translate(${from.left - to.left}px, ${from.top - to.top}px) scale(${from.width / to.width}, ${from.height / to.height})` },
+      { transformOrigin: '0 0', transform: 'none' },
+    ], motion);
+  }
+  function moveLayout(change) {
+    const before = new Map([...document.querySelectorAll('.pane')].map(p => [p, box(p.getBoundingClientRect())]));
+    const entering = change(before) || new Map();
+    if (reduced()) return;
+    for (const pane of document.querySelectorAll('.pane:not(.ghost)')) {
+      const from = before.get(pane) || entering.get(pane);
+      if (from) moveFrom(pane, from);
+    }
+  }
+
+  function newPane() {
+    const pane = document.createElement('section');
+    pane.className = 'pane'; pane.dataset.app = 'nu'; pane.tabIndex = 0;
+    pane.innerHTML = '<div class="pane-head"><svg viewBox="0 0 16 16"></svg><span class="title"><b>nu</b> ~/dev/projects/ghostty</span></div><div class="term"><span class="b">❯</span> <span class="cursor"></span></div>';
+    setupPane(pane);
+    return pane;
+  }
+
+  // The new pane grows out of the old pane's far edge while the old pane
+  // makes room for it.
+  function splitPane(pane, direction) {
+    if (pane.classList.contains('zoomed')) zoomPane(pane);
+    moveLayout(before => {
+      const split = document.createElement('div');
+      split.className = 'split ' + direction;
+      split.style.flex = pane.style.flex;
+      pane.style.flex = '';
+      pane.replaceWith(split);
+      const fresh = newPane();
+      split.append(pane, fresh);
+      setActive(fresh);
+      const old = before.get(pane);
+      const to = fresh.getBoundingClientRect();
+      const edge = direction === 'h'
+        ? { left: old.left + old.width, top: to.top, width: 1, height: to.height }
+        : { left: to.left, top: old.top + old.height, width: to.width, height: 1 };
+      return new Map([[fresh, edge]]);
+    });
+  }
+
+  // A picture of the closed pane shrinks towards its far edge while its
+  // neighbour grows into the space.
+  function closePane(pane) {
+    if (document.querySelectorAll('.pane:not(.ghost)').length === 1) return;
+    const win = document.querySelector('.window');
+    const parent = pane.parentElement;
+    const horizontal = parent.classList.contains('h');
+    const first = parent.firstElementChild === pane;
+    const rect = pane.getBoundingClientRect(), frame = win.getBoundingClientRect();
+    const ghost = pane.cloneNode(true);
+    ghost.classList.add('ghost'); ghost.classList.remove('active', 'zoomed');
+    Object.assign(ghost.style, { left: `${rect.left - frame.left}px`, top: `${rect.top - frame.top}px`, width: `${rect.width}px`, height: `${rect.height}px`, flex: 'none' });
+    moveLayout(() => {
+      pane.remove();
+      if (parent.classList.contains('split') && parent.children.length === 1) {
+        const only = parent.firstElementChild;
+        only.style.flex = parent.style.flex;
+        parent.replaceWith(only);
+      }
+      if (pane.classList.contains('active')) setActive(document.querySelector('.pane'));
+    });
+    if (reduced()) return;
+    win.append(ghost);
+    const origin = horizontal ? (first ? 'left center' : 'right center') : (first ? 'center top' : 'center bottom');
+    ghost.animate([
+      { transformOrigin: origin, transform: 'none' },
+      { transformOrigin: origin, transform: horizontal ? 'scaleX(0.001)' : 'scaleY(0.001)' },
+    ], motion).finished.then(() => ghost.remove());
+  }
+
+  // Zoom grows the pane to fill the tab and shrinks it back.
+  function zoomPane(pane) {
+    moveLayout(() => { pane.classList.toggle('zoomed'); });
+  }
+  document.addEventListener('keydown', event => {
+    if (!event.altKey || event.ctrlKey || event.target.closest?.('input, select')) return;
+    const active = document.querySelector('.pane.active');
+    if (!active) return;
+    // The physical key: with Shift, some browsers and layouts give another character.
+    if (event.code === 'KeyD') { event.preventDefault(); splitPane(active, 'h'); }
+    if (event.code === 'KeyE') { event.preventDefault(); splitPane(active, 'v'); }
+    if (event.code === 'KeyW') { event.preventDefault(); closePane(active); }
+    if (event.code === 'KeyZ') { event.preventDefault(); zoomPane(active); }
   });
 
   // Command palette. The commands are existing Ghostty actions; "›" opens a second step.
@@ -357,7 +507,7 @@ Working copy  (@) : <span class="y">qzyxxpqy</span> <span class="b">be79660f</sp
     ['Session', 'New Session', 'Alt+N'], ['Session', 'Pick Theme…', '', true],
     ['Tab', 'New Tab', 'Ctrl+Shift+T'], ['Tab', 'Rename Tab', '', true], ['Tab', 'Close Tab', 'Ctrl+Shift+W'], ['Tab', 'New Window', 'Ctrl+Shift+N'],
     ['Pane', 'Split Pane Right', 'Ctrl+Shift+O'], ['Pane', 'Split Pane Down', 'Ctrl+Shift+E'], ['Pane', 'Toggle Pane Zoom', 'Ctrl+Shift+Enter'],
-    ['Pane', 'Stack Pane', 'Alt+P'], ['Pane', 'Toggle Floating Terminal', 'Alt+`'], ['Pane', 'Toggle Pane Decorations', ''],
+    ['Pane', 'Insert Path…', 'Super+I', true], ['Pane', 'Stack Pane', 'Alt+P'], ['Pane', 'Toggle Floating Terminal', 'Alt+`'], ['Pane', 'Toggle Pane Decorations', ''],
   ];
   let paletteIndex = 0;
   function renderPalette() {
@@ -382,10 +532,11 @@ Working copy  (@) : <span class="y">qzyxxpqy</span> <span class="b">be79660f</sp
     return shown.length;
   }
   function closePalette() { $('.palette').hidden = true; }
-  // Only "Toggle Tab List" does something in this draft.
+  // Only "Toggle Tab List" and "Insert Path…" do something in this draft.
   function runCommand(name) {
     closePalette();
     if (name === 'Toggle Tab List') toggleSide();
+    if (name === 'Insert Path…') openPicker(document.querySelector('.pane.active'));
   }
   document.querySelectorAll('.open-palette').forEach(button => button.addEventListener('click', event => {
     event.stopPropagation();
@@ -407,6 +558,230 @@ Working copy  (@) : <span class="y">qzyxxpqy</span> <span class="b">be79660f</sp
   });
   document.addEventListener('pointerdown', event => { if (!event.target.closest('.palette, .open-palette')) closePalette(); });
 
+  // Path picker. It shows the files and folders of the typed folder, one level at a
+  // time, and recent paths (clock icon). Enter puts the path at the cursor.
+  // A folder is an object, a file is null.
+  const home = {
+    '.config': { hamlet: { ghostty: { 'config': null, 'init.lua': null }, helix: { 'config.toml': null } }, nushell: { 'config.nu': null, 'env.nu': null } },
+    '.ssh': { 'config': null }, '.gitconfig': null, '.zshrc': null,
+    Applications: {}, bin: { 'jj-sync': null }, Desktop: {}, go: {}, Music: {}, Pictures: {},
+    Documents: { vault: { 'Inbox.md': null, 'Ghostty fork.md': null }, 'notes.md': null },
+    Downloads: { 'ghostty-1.2.tar.gz': null, 'Screenshot 2026-10-26.png': null, 'rex-file-picker.png': null },
+    'Screen Studio Projects': {},
+    dev: { projects: {
+      site: { 'index.html': null },
+      ghostty: {
+        '.jj': {}, '.git': {}, 'AGENTS.md': null, 'FORK_STATUS.md': null, 'build.zig': null, 'flake.nix': null, 'README.md': null,
+        design: { 'ui-draft': { 'index.html': null, 'rex.html': null, 'rex-reference': { '06-dark-command-palette.png': null } } },
+        include: { ghostty: { 'vt.h': null } }, macos: {},
+        src: { 'main.zig': null, 'Surface.zig': null, config: { 'Config.zig': null }, apprt: { gtk: { css: { 'style.css': null }, 'theme_css.zig': null, 'Window.zig': null, 'Surface.zig': null } } },
+      },
+    } },
+  };
+  // Newest first. "pane" paths come from OSC 7; "picked" paths were picked here before.
+  const recent = [
+    { path: '~/dev/projects/ghostty/FORK_STATUS.md', from: 'picked' },
+    { path: '~/dev/projects/ghostty/src/apprt/gtk', from: 'pane' },
+    { path: '~/.config/hamlet/ghostty', from: 'pane' },
+    { path: '~/Downloads', from: 'pane' },
+    { path: '~/dev/projects/site', from: 'pane' },
+  ];
+  const folderIcon = '<svg viewBox="0 0 16 16"><path d="M2 4.5a1 1 0 0 1 1-1h3l1.5 1.5H13a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z"/></svg>';
+  const fileIcon = '<svg viewBox="0 0 16 16"><path d="M4 2.5h5l3 3v8H4z"/><path d="M9 2.5v3h3"/></svg>';
+  const clockIcon = '<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5"/><path d="M8 5v3l2 1.5"/></svg>';
+  const picker = { pane: null, cursor: null, base: '~/', items: [], index: 0 };
+  // At a shell prompt (OSC 133 in GTK) the path is quoted for the shell. In any
+  // other program (Helix, Claude Code, Codex) it is plain text.
+  const shellPane = pane => !['hx', 'btop', 'claude', 'codex'].includes(pane?.dataset.app);
+
+  // Walks "~/a/b/" to its folder. Paths that do not start with "~" are relative to the pane folder.
+  function folderAt(path) {
+    if (!path.startsWith('~')) path = picker.base + path;
+    let node = home;
+    for (const part of path.replace(/^~\/?/, '').split('/').filter(Boolean)) {
+      node = node?.[part];
+      if (!node || typeof node !== 'object') return null;
+    }
+    return node;
+  }
+  // Letters of the query in the same order, case does not matter. A lower score is a better match.
+  function fuzzy(query, text) {
+    if (!query) return { score: 0, hits: [] };
+    const hits = [];
+    let from = 0;
+    for (const char of query.toLowerCase()) {
+      const at = text.toLowerCase().indexOf(char, from);
+      if (at < 0) return null;
+      hits.push(at); from = at + 1;
+    }
+    const gaps = hits[hits.length - 1] - hits[0] - hits.length + 1;
+    return { score: hits[0] * 2 + gaps, hits };
+  }
+  const marked = (text, hits) => [...text].map((char, i) => hits.includes(i) ? `<b>${char}</b>` : char).join('');
+
+  function renderPicker() {
+    const input = $('#picker-input').value;
+    const cut = input.lastIndexOf('/') + 1;
+    const folder = input.slice(0, cut), part = input.slice(cut);
+    const full = folder.startsWith('~') ? folder : picker.base + folder;
+    const showHidden = part.startsWith('.');
+
+    // Recent paths under the typed folder come first, so they are next to the search box.
+    const recentItems = recent
+      .filter(entry => entry.path.startsWith(full) && entry.path !== full.replace(/\/$/, ''))
+      .map(entry => {
+        const rest = entry.path.slice(full.length);
+        return { ...entry, rest, dir: folderAt(entry.path) !== null, match: fuzzy(part, rest) };
+      })
+      .filter(item => item.match && (showHidden || !item.rest.split('/').some(p => p.startsWith('.'))))
+      .sort((a, b) => a.match.score - b.match.score)
+      .slice(0, 4);
+    const node = folderAt(folder);
+    const children = Object.entries(node || {})
+      .filter(([name]) => showHidden || !name.startsWith('.'))
+      .filter(([name]) => !recentItems.some(item => item.rest === name))
+      .map(([name, value]) => ({ rest: name, dir: value !== null, match: fuzzy(part, name) }))
+      .filter(item => item.match)
+      .sort((a, b) => a.match.score - b.match.score || b.dir - a.dir || a.rest.localeCompare(b.rest));
+    picker.items = [...recentItems, ...children].map(item => ({ ...item, path: folder + item.rest }));
+    picker.index = Math.max(0, Math.min(picker.index, picker.items.length - 1));
+
+    const list = $('.picker-list');
+    list.innerHTML = picker.items.length ? '' : `<div class="picker-empty">${node ? 'No matching files' : 'No folder named ' + folder}</div>`;
+    picker.items.forEach((item, index) => {
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'picker-item' + (index === picker.index ? ' selected' : '');
+      row.setAttribute('role', 'option');
+      row.innerHTML = `<span class="kind ${item.dir ? 'dir' : 'file'}">${item.dir ? folderIcon : fileIcon}</span><span class="name">${marked(item.rest, item.match.hits)}</span>`
+        + (item.from ? `<span class="recent" title="${item.from === 'pane' ? 'A pane was in this folder' : 'Picked here before'}">${clockIcon}</span>` : '');
+      row.addEventListener('mousemove', () => { if (picker.index !== index) { picker.index = index; renderPicker(); } });
+      row.addEventListener('click', () => { picker.index = index; acceptPicker(false); });
+      list.append(row);
+    });
+    list.querySelector('.selected')?.scrollIntoView({ block: 'nearest' });
+  }
+
+  // Places the card at the cursor, inside the pane. It prefers above the cursor, like Rex.
+  function openPicker(pane) {
+    if (!pane) return;
+    closePalette();
+    const card = $('.picker');
+    if (!card.hidden && picker.pane === pane) return closePicker();
+    picker.pane = pane;
+    picker.cursor = pane.querySelector('.cursor');
+    picker.base = (pane.querySelector('.pane-head .title')?.textContent.split(' ')[1] || '~').replace(/\/?$/, '/');
+    picker.index = 0;
+    $('#picker-input').value = picker.base;
+
+    const win = $('.window').getBoundingClientRect();
+    const body = pane.querySelector('.term').getBoundingClientRect();
+    const row = 28, chrome = 6 + 44;
+    const width = Math.min(340, body.width - 16);
+    // The search text starts 40 px into the card: margin, padding, icon and gap.
+    const anchor = picker.cursor?.getBoundingClientRect();
+    const x = anchor ? anchor.left - 40 : body.left + (body.width - width) / 2;
+    card.style.width = width + 'px';
+    card.style.left = Math.max(body.left + 8, Math.min(x, body.right - 8 - width)) - win.left + 'px';
+    card.style.top = card.style.bottom = '';
+    const roomAbove = anchor ? Math.floor((anchor.top - 4 - body.top - chrome) / row) : 0;
+    const roomBelow = Math.floor(((anchor ? body.bottom - anchor.bottom - 4 : body.height - 16) - chrome) / row);
+    const above = anchor && roomAbove >= Math.min(4, roomBelow);
+    card.classList.toggle('above', above);
+    if (Math.max(roomAbove, roomBelow) < 3) {
+      // The pane is too small for 3 rows: use the middle of the window.
+      card.classList.remove('above');
+      card.style.width = '340px';
+      card.style.left = (win.width - 340) / 2 + 'px';
+      card.style.top = win.height * 0.2 + 'px';
+      $('.picker-list').style.maxHeight = 10 * row + 6 + 'px';
+    } else {
+      if (above) card.style.bottom = win.bottom - anchor.top + 4 + 'px';
+      else card.style.top = (anchor ? anchor.bottom + 4 : body.top + 8) - win.top + 'px';
+      $('.picker-list').style.maxHeight = Math.min(10, above ? roomAbove : roomBelow) * row + 6 + 'px';
+    }
+
+    card.hidden = false;
+    renderPicker();
+    $('#picker-input').focus();
+    $('#picker-input').setSelectionRange(picker.base.length, picker.base.length);
+  }
+  function closePicker() {
+    $('.picker').hidden = true;
+    picker.pane?.focus();
+  }
+  // Tab on a folder goes into it. Enter (and Tab on a file) puts the path at the cursor.
+  function acceptPicker(intoFolder) {
+    const item = picker.items[picker.index];
+    if (intoFolder && item?.dir) {
+      $('#picker-input').value = item.path + '/';
+      picker.index = 0;
+      renderPicker();
+      return;
+    }
+    const path = item ? item.path + (item.dir ? '/' : '') : $('#picker-input').value;
+    if (picker.cursor && path) {
+      const absolute = path.startsWith('~') ? path.replace(/\/$/, '') : picker.base + path.replace(/\/$/, '');
+      // A path inside the pane's folder is put in relative to it.
+      let text = path.startsWith(picker.base) && path !== picker.base ? path.slice(picker.base.length) : path;
+      if (shellPane(picker.pane)) {
+        // A name that starts with "-" would be read as an option.
+        if (text.startsWith('-')) text = './' + text;
+        // A path with a space or another special character goes in single quotes, which
+        // bash, zsh, fish and nushell all read the same. "~" does not expand inside
+        // quotes, so a quoted path starts with the full home folder instead.
+        if (/[^\w.\/~+@%,:=-]/.test(text)) text = `'${text.replace(/^~/, '/home/jemal')}'`;
+      }
+      // Add a space when the cursor is right after other text.
+      const before = picker.cursor.previousSibling?.textContent ?? '';
+      if (before && !/\s$/.test(before)) text = ' ' + text;
+      picker.cursor.before(text + (item && !item.dir ? ' ' : ''));
+      // Only paths that exist are kept as recent; typed text that matched nothing is not.
+      if (item) recent.splice(0, recent.length, { path: absolute, from: 'picked' }, ...recent.filter(entry => entry.path !== absolute));
+    }
+    closePicker();
+  }
+  $('#picker-input').addEventListener('input', event => {
+    // Typing "~/" or "/" after a folder starts the path again from there.
+    const restart = event.target.value.match(/.\/(~\/.*|\/.*)$/);
+    if (restart) event.target.value = restart[1];
+    picker.index = 0; renderPicker();
+  });
+  $('#picker-input').addEventListener('keydown', event => {
+    const count = picker.items.length;
+    // Up and Down follow the screen: above the cursor, the list order is reversed.
+    const up = $('.picker').classList.contains('above') ? 1 : -1;
+    if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+      event.preventDefault();
+      if (count) picker.index = (picker.index + (event.key === 'ArrowUp' ? up : -up) + count) % count;
+      renderPicker();
+    } else if (event.key === 'Tab' && event.shiftKey) {
+      // Shift+Tab goes up one folder.
+      event.preventDefault();
+      const parent = event.target.value.replace(/[^/]*$/, '').replace(/[^/]+\/$/, '');
+      event.target.value = parent && parent !== '~' ? parent : '~/';
+      picker.index = 0; renderPicker();
+    } else if (event.key === 'Tab') { event.preventDefault(); acceptPicker(true); }
+    else if (event.key === 'Enter') { event.preventDefault(); acceptPicker(false); }
+    else if (event.key === 'Escape') { event.preventDefault(); closePicker(); }
+  });
+  document.addEventListener('pointerdown', event => { if (!$('.picker').hidden && !event.target.closest('.picker, #try-picker')) closePicker(); });
+  document.addEventListener('keydown', event => {
+    if (!event.metaKey || event.code !== 'KeyI' || event.target.closest?.('input, select')) return;
+    // Super+I opens the picker in every pane, so Helix's ":e" can use it too.
+    // Programs in a terminal do not get Super keys, so no program loses a key.
+    const pane = document.querySelector('.pane.active');
+    if (!pane) return;
+    event.preventDefault();
+    if (!$('.picker').hidden && picker.pane === pane) return closePicker();
+    openPicker(pane);
+  });
+  $('#try-picker').addEventListener('click', () => {
+    const pane = document.querySelector('.pane[data-app="nu"]');
+    setActive(pane);
+    openPicker(pane);
+  });
+
   // Study controls. Each select owns one group of body classes.
   const groups = { theme: ['light', 'kanagawa'], layout: ['tabs-hidden', 'side-open'], focus: ['focus-dim'], actions: ['actions-faint'], spacing: ['spacing-current'] };
   Object.entries(groups).forEach(([id, classes]) => $('#' + id).addEventListener('change', event => {
@@ -426,6 +801,8 @@ Working copy  (@) : <span class="y">qzyxxpqy</span> <span class="b">be79660f</sp
   document.addEventListener('keydown', event => {
     if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'b') { event.preventDefault(); toggleSide(); }
   });
+  $('#speed').addEventListener('input', event => { motion.duration = +event.target.value; $('#speed-value').value = event.target.value + ' ms'; });
+  $('#curve').addEventListener('change', event => { motion.easing = event.target.value; });
   $('#status').addEventListener('change', event => { $('.tools .status').hidden = !event.target.checked; });
 </script>
 </html>

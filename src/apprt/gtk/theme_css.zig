@@ -5,13 +5,17 @@ const Config = @import("../../config/Config.zig");
 pub fn write(writer: *std.Io.Writer, config: *const Config, selector: []const u8) !void {
     const headerbar_background = config.@"window-titlebar-background" orelse config.background;
     const headerbar_foreground = config.@"window-titlebar-foreground" orelse config.foreground;
-    // Decorated panes sit on a darker window background, like cards. Light
-    // themes need much less black for the same difference.
-    const shell_shade: u8 = shade: {
+    // Decorated panes are cards on a darker window background. As in Rex,
+    // dark themes mark the card edge with a light 1 px border; light themes
+    // with the darker gap, a faint border and a faint line under the card.
+    const dark = dark: {
         const bg = config.background;
         const luma = (@as(u32, bg.r) * 299 + @as(u32, bg.g) * 587 + @as(u32, bg.b) * 114) / 1000;
-        break :shade if (luma < 128) 28 else 7;
+        break :dark luma < 128;
     };
+    const shell_shade: u8 = if (dark) 28 else 11;
+    const pane_border: u8 = if (dark) 10 else 8;
+    const pane_shadow = if (dark) "none" else "0 1px 0 rgba(0, 0, 0, 0.05)";
     try writer.print(
         \\{s} {{
         \\  --ghostty-fg: rgb({d},{d},{d});
@@ -21,6 +25,8 @@ pub fn write(writer: *std.Io.Writer, config: *const Config, selector: []const u8
         \\  --ghostty-raised-bg: color-mix(in srgb, var(--ghostty-fg) 8%, var(--ghostty-bg));
         \\  --ghostty-accent: rgb({d},{d},{d});
         \\  --ghostty-shell-bg: color-mix(in srgb, black {d}%, var(--ghostty-bg));
+        \\  --ghostty-pane-border: color-mix(in srgb, var(--ghostty-fg) {d}%, transparent);
+        \\  --ghostty-pane-shadow: {s};
         \\  --headerbar-fg-color: var(--ghostty-fg);
         \\  --headerbar-bg-color: var(--ghostty-chrome-bg);
         \\  --headerbar-backdrop-color: oklab(from var(--headerbar-bg-color) calc(l * 0.9) a b / alpha);
@@ -80,6 +86,8 @@ pub fn write(writer: *std.Io.Writer, config: *const Config, selector: []const u8
         config.palette.value[12].g,
         config.palette.value[12].b,
         shell_shade,
+        pane_border,
+        pane_shadow,
         selector,
         selector,
         selector,

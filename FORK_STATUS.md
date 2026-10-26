@@ -1,11 +1,72 @@
 # Ghostty fork: status and roadmap
 
-Updated: 2026-10-25
+Updated: 2026-10-28
 
 This document records the work completed across the development chats, the current feature boundaries, and the ideas discussed for future work. It describes this fork's GTK/Linux implementation. It does not imply equivalent support in the macOS application.
 
 ## Current checkpoint
 
+- Path picker in GTK on 2026-10-28 (four jj commits on top of this change:
+  `gtk: add path picker rules`, `gtk: keep recent paths for the path
+  picker`, `gtk: let picker placement keep a chosen side`, `gtk: add the
+  insert_path action and path picker card`; tested in the X11 sandbox; the
+  user tried it on 2026-10-28, also with spaces and quotes in names at a
+  nushell prompt, and is happy with it; not installed). There
+  is no default key. The user binds Super+I in the hamlet `init.lua` with
+  `ghostty.bind("super+i", function() ghostty.invoke("insert_path") end)`.
+  With a Lua bind, Super+I does not close the open card (the card only
+  knows INI binds to `insert_path`); Escape and a click outside close it,
+  and the user said that is enough. A fifth commit adds Ctrl+J/Ctrl+K
+  (down and up on the screen) and Ctrl+N/Ctrl+P (worse and better match,
+  like a completion menu). Differences
+  from the draft: a quoted path keeps `~/` outside the quotes (`~/'a b/'`),
+  except in nushell, which gets the full home folder; a pane is "remote"
+  when its foreground program is ssh, mosh, et, docker, podman, kubectl,
+  incus or lxc, because Ghostty ignores OSC 7 from other hosts; recent
+  paths have no host field for the same reason. Two Ghostty processes with
+  the same app ID can overwrite each other's recent list.
+  The approved draft:
+- Path picker draft approved on 2026-10-28 (HTML only):
+  `design/ui-draft/rex.html` copies Rex's picker. Super+I opens a card at the
+  terminal cursor in every pane (shell, Helix `:e`, Claude, Codex); Super+I
+  again closes it. Above the cursor, the search box is at the bottom and the
+  best match is next to it. The search box starts with the pane's folder
+  (OSC 7), or `~/` when that is not known. The list shows the files and
+  folders of the typed folder, one level at a time, folders first; hidden
+  files show only when the typed name starts with `.`. Clock rows are recent
+  paths: OSC 7 folders and earlier picks. The filter matches the letters in
+  order. Tab goes into a folder, Shift+Tab goes up, typing `~/` or `/` after a
+  folder starts again, Enter inserts, Escape closes. The path goes in through
+  the normal paste. Paths inside the pane's folder are relative; a space is
+  added after other text. At a shell prompt (OSC 133) a path with special
+  characters gets single quotes with the full home folder in place of `~`
+  (double quotes are not literal), and a name that starts with `-` gets
+  `./`. In other programs the path is plain text. A pane with too little
+  room uses the middle of the window. Decided for GTK: read folders on a
+  background thread with a "Loading…" state and show the best 200; SSH and
+  container panes (OSC 7 host is not this machine) open the card with no
+  file list; recent paths store their host and are saved in
+  `$XDG_STATE_HOME/ghostty/` (user-only, at most 200, a setting can turn
+  them off); names with control characters cannot be inserted. Not now:
+  frecency, fff (a Rust file index), project-wide search. To check in GTK:
+  whether Helix's command line accepts quoted paths with spaces.
+
+- Pane borders on 2026-10-27 (installed for a desktop test, not committed):
+  compared with the Rex references, light-theme cards were hard to see. The
+  theme CSS now sets `--ghostty-pane-border` and `--ghostty-pane-shadow` by
+  theme brightness: dark themes get a 10% light border (was 6%) and no
+  shadow; light themes get an 11% darker gap (was 7%), an 8% border and a
+  faint 1 px line under each card, like Rex light.
+
+- Pane motion was tried and dropped on 2026-10-26. The approved HTML study
+  (`rex.html`: split, close and zoom motion, 200 ms ease out) stays as a
+  record. In GTK, pictures of the panes moved over a cover layer while the
+  split tree was rebuilt. Live pictures flickered (upstream #8208: the
+  rebuild and resize of terminals on Linux; #11170 and #13414 are already in
+  `folie`). Still pictures removed the flicker, but scaled text looked
+  stretched, and clipped pictures left growing panes empty during the
+  motion. The user decided to drop the attempt; no code was kept and the
+  committed build was reinstalled.
 - Rex-style UI, first GTK pass on 2026-10-25 (Debug, not desktop-tested, not
   installed or committed). The user approved `design/ui-draft/rex.html`, which
   replaces the earlier activity/vertical studies. This pass changes the top-bar
