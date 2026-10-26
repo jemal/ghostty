@@ -19,10 +19,16 @@ window.ssd.no-border-radius {
   color: var(--window-fg-color);
 }
 
-/* Decorated panes are cards on a darker window background. The bar uses the
- * window background too. --ghostty-shell-bg comes from window-theme=ghostty. */
-.window.pane-decorations {
+/* The tab bar and the side tab list are darker than the terminal, so that
+ * they stay separate from it also without pane decorations. Decorated panes
+ * are cards on the same darker window background. --ghostty-shell-bg comes
+ * from window-theme=ghostty. */
+.window {
   --ghostty-bar-bg: var(--ghostty-shell-bg);
+}
+
+.window.pane-decorations,
+.window .tab-side {
   background-color: var(--ghostty-shell-bg, color-mix(in srgb, black 20%, var(--window-bg-color)));
 }
 
@@ -42,6 +48,11 @@ window.ssd.no-border-radius {
 
 .window .tab-side {
   padding: 10px 0 10px 10px;
+}
+
+/* Without pane cards, keep the list away from the terminal's edge. */
+.window:not(.pane-decorations) .tab-side {
+  padding-right: 10px;
 }
 
 .window .tab-side-head {

@@ -11,8 +11,6 @@ const Common = @import("class.zig").Common;
 const Window = @import("class/window.zig").Window;
 const ext = @import("ext.zig");
 const layout = @import("compact_tab_layout.zig");
-const program_icon = @import("program_icon.zig");
-const Application = @import("class/application.zig").Application;
 
 pub const State = struct {
     view: ?*adw.TabView = null,
@@ -451,13 +449,8 @@ const Chip = extern struct {
     fn refresh(self: *Self) void {
         const priv = self.private();
         const page = priv.page orelse return;
-        {
-            const alloc = Application.default().allocator();
-            const keyword = if (page.getKeyword()) |v| std.mem.span(v) else "";
-            const markup = program_icon.labelMarkup(alloc, keyword, std.mem.span(page.getTitle())) catch null;
-            defer if (markup) |v| alloc.free(v);
-            if (markup) |v| priv.label.setMarkup(v) else priv.label.setLabel(page.getTitle());
-        }
+        // Like Rex, tabs show only the title; pane headers show the program.
+        priv.label.setLabel(page.getTitle());
         if (page.getIcon()) |icon| priv.icon.setFromGicon(icon);
         priv.icon.as(gtk.Widget).setVisible(@intFromBool(page.getIcon() != null));
 

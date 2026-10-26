@@ -51,6 +51,14 @@ This document records the work completed across the development chats, the curre
   plus the uncommitted working copy). Configuration validation passed,
   including `gtk-tabs-location = left` and `unfocused-split-opacity = 0.55`.
   Running sessions were not restarted. Committed in jj change `qzyxxpqy`.
+  Follow-up on 2026-10-26: like Rex (`rex-reference/05-dark-vertical-tabs.png`),
+  tabs show only the title; the bold program name stays in pane headers.
+  Tab pages still carry the program name as their search keyword.
+  Without pane decorations, the top bar and the side list now also use the
+  darker window colour (`--ghostty-shell-bg`), so they stay separate from
+  the terminal; the side list gets 10 px right padding in that case.
+  Installed with ReleaseFast and system Fontconfig to `~/.local` on
+  2026-10-26 and committed in jj change `zzuqsqxk`.
   Follow-up reinstall at 23:12: the first pane's sidebar button no longer
   adds left margin, so its icon is 12 px from the left and top edges, like
   other header icons (measured in the X11 sandbox).
@@ -1032,6 +1040,7 @@ upstream; `main` tracks `main@origin`. Never push `folie` to `origin`.
 | `rnvumyqp` | gtk: add tiled pane stacks and focus history |
 | `vyuuvvwy` | gtk: add content-sized tabs and quiet attention |
 | `qzyxxpqy` | gtk: add Rex-style panes, program icons and vertical tabs |
+| `zzuqsqxk` | gtk: show titles only in tabs and darken tab areas |
 
 ## Related implementation documentation
 
