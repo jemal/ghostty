@@ -22,4 +22,5 @@ test {
     _ = @import("gtk/program_icon.zig");
     _ = @import("gtk/picker/protocol.zig");
     _ = @import("gtk/picker/placement.zig");
+    _ = @import("gtk/picker/path.zig");
 }
