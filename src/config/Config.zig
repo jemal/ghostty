@@ -3900,10 +3900,11 @@ else
 /// respects the titlebar style and `window-show-tab-bar`. GTK only.
 @"gtk-toolbar-visible": bool = true,
 
-/// Keep a list of recent paths: the folders that panes were in (from OSC 7).
-/// The list is saved in `$XDG_STATE_HOME/ghostty/recent-paths`, readable only
-/// by you, with at most 200 paths. Set to `false` to stop adding to the list;
-/// the saved file is kept. GTK only.
+/// Keep a list of recent paths for the path picker (`insert_path`): the
+/// folders that panes were in (from OSC 7) and the paths picked in it. The
+/// list is saved in `$XDG_STATE_HOME/ghostty/recent-paths`, readable only by
+/// you, with at most 200 paths. Set to `false` to stop adding to the list and
+/// to hide it in the picker; the saved file is kept. GTK only.
 @"path-picker-history": bool = true,
 
 /// Automatically hide window toolbars when a session is unsaved and has only

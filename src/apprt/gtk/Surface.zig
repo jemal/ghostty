@@ -57,6 +57,11 @@ pub fn pickTheme(self: *Self) bool {
     return true;
 }
 
+pub fn insertPath(self: *Self) bool {
+    self.surface.togglePathPicker();
+    return true;
+}
+
 pub fn runLua(self: *Self, name: []const u8) bool {
     return Application.default().runLua(name, self.core().id);
 }

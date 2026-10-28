@@ -459,6 +459,12 @@ fn actionCommands(action: Action.Key) []const Command {
             .description = i18n.N_("Find, open, and manage saved sessions (GTK only)."),
         }},
 
+        .insert_path => comptime &.{.{
+            .action = .insert_path,
+            .title = i18n.N_("Insert Path…"),
+            .description = i18n.N_("Choose a file or folder and paste its path at the cursor (GTK only)."),
+        }},
+
         .pick_theme => comptime &.{.{
             .action = .pick_theme,
             .title = i18n.N_("Pick Theme…"),

@@ -639,6 +639,11 @@ pub const Action = union(enum) {
     /// Preview installed themes in the current window (GTK only).
     pick_theme,
 
+    /// Open the path picker at the terminal cursor: choose a file or folder
+    /// and paste its path into the pane. At a shell prompt the path is quoted
+    /// for the shell. Run it again to close the picker (GTK only).
+    insert_path,
+
     /// Run an action that `init.lua` in the Ghostty config directory
     /// defines with `ghostty.action`. The parameter is the action name,
     /// for example `lua:cargo_targets`. The binding is not performed if
@@ -1531,6 +1536,7 @@ pub const Action = union(enum) {
             .next_float_tab,
             .previous_float_tab,
             .pick_theme,
+            .insert_path,
             .switch_session,
             .lua,
             .new_split,

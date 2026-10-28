@@ -2960,6 +2960,11 @@ pub const Window = extern struct {
         self.private().theme.clear(self);
     }
 
+    /// An overlay over all the tabs, for cards that do not fit in a pane.
+    pub fn cardOverlay(self: *Self) *gtk.Overlay {
+        return self.private().theme_overlay;
+    }
+
     pub fn pickTheme(self: *Self) void {
         self.private().theme.open(self, self.private().theme_overlay) catch |err| {
             log.warn("opening theme picker: {}", .{err});

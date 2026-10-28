@@ -31,6 +31,7 @@ const program_icon = @import("../program_icon.zig");
 const Config = @import("config.zig").Config;
 const ResizeOverlay = @import("resize_overlay.zig").ResizeOverlay;
 const SearchOverlay = @import("search_overlay.zig").SearchOverlay;
+const PathPicker = @import("../picker/path_picker.zig");
 const placement = @import("../picker/placement.zig");
 const KeyStateOverlay = @import("key_state_overlay.zig").KeyStateOverlay;
 const ChildExited = @import("surface_child_exited.zig").SurfaceChildExited;
@@ -733,6 +734,9 @@ pub const Surface = extern struct {
         program: c_uint = 0,
         program_name: ?[:0]const u8 = null,
         program_timer: ?c_uint = null,
+
+        /// The open path picker, if any.
+        path_picker: ?*PathPicker = null,
 
         /// True if this surface is in an error state. This is currently
         /// a simple boolean with no additional information on WHAT the
@@ -1564,6 +1568,7 @@ pub const Surface = extern struct {
 
     pub fn close(self: *Self) void {
         if (Application.default().picker()) |service| service.cancelSurface(self, "pane_closed");
+        self.closePathPicker();
         signals.@"close-request".impl.emit(
             self,
             null,
@@ -1580,6 +1585,7 @@ pub const Surface = extern struct {
         const priv = self.private();
         priv.child_exited = true;
         if (Application.default().picker()) |service| service.cancelSurface(self, "child_exited");
+        self.closePathPicker();
         self.as(gobject.Object).notifyByPspec(
             properties.@"child-exited".impl.param_spec,
         );
@@ -1685,6 +1691,53 @@ pub const Surface = extern struct {
             .width = @intFromFloat(@ceil(@as(f64, @floatFromInt(size.cell.width)) / scale)),
             .height = @intFromFloat(@ceil(@as(f64, @floatFromInt(size.cell.height)) / scale)),
         };
+    }
+
+    /// Open the path picker at the cursor, or close it if it is open.
+    pub fn togglePathPicker(self: *Self) void {
+        const priv = self.private();
+        if (priv.path_picker != null) return self.closePathPicker();
+        if (priv.child_exited or self.as(gtk.Widget).getMapped() == 0) return;
+        const core_surface = priv.core_surface orelse return;
+
+        // Read the prompt state and the cell left of the cursor together.
+        const at_prompt, const after_text = state: {
+            core_surface.renderer_state.mutex.lockUncancelable(global.io());
+            defer core_surface.renderer_state.mutex.unlock(global.io());
+            const t = core_surface.renderer_state.terminal;
+            const screen = t.screens.active;
+            const at_prompt = t.screens.active_key == .primary and screen.cursor.semantic_content != .output;
+            const x = screen.cursor.x;
+            const after_text = x > 0 and if (screen.pages.getCell(.{ .active = .{ .x = x - 1, .y = screen.cursor.y } })) |cell|
+                cell.cell.hasText() and cell.cell.codepoint() != ' '
+            else
+                false;
+            break :state .{ at_prompt, after_text };
+        };
+        const window = ext.getAncestor(Window, self.as(gtk.Widget));
+        priv.path_picker = PathPicker.create(Application.default().allocator(), self, .{
+            .pwd = priv.pwd,
+            .at_prompt = at_prompt,
+            .after_text = after_text,
+            .program = priv.program_name,
+            .anchor = self.cursorRect(),
+            .pane = priv.terminal_page,
+            .window = if (window) |w| w.cardOverlay() else null,
+        }) catch |err| {
+            log.warn("unable to open the path picker err={}", .{err});
+            return;
+        };
+    }
+
+    /// Paste text into the terminal, the same as a paste from the clipboard.
+    pub fn pasteText(self: *Self, text: [:0]const u8) void {
+        Clipboard.paste(self, text);
+    }
+
+    pub fn closePathPicker(self: *Self) void {
+        const picker = self.private().path_picker orelse return;
+        self.private().path_picker = null;
+        picker.destroy();
     }
 
     pub fn showPicker(self: *Self, widget: *gtk.Widget) void {
@@ -2002,6 +2055,7 @@ pub const Surface = extern struct {
         self.cancelSessionRelaunch();
         self.stopProgramTimer();
         if (Application.default().picker()) |service| service.cancelSurface(self, "pane_closed");
+        self.closePathPicker();
         const priv = self.private();
 
         self.clearDesktopNotifications();

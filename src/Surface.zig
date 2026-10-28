@@ -5661,6 +5661,12 @@ pub fn performBindingAction(self: *Surface, action: input.Binding.Action) !bool 
             return false;
         },
 
+        .insert_path => {
+            if (comptime @hasDecl(apprt.Surface, "insertPath"))
+                return self.rt_surface.insertPath();
+            return false;
+        },
+
         .pick_theme => {
             if (comptime @hasDecl(apprt.Surface, "pickTheme"))
                 return self.rt_surface.pickTheme();

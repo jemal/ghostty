@@ -592,6 +592,15 @@ dialog.command-palette shortcut > label.keycap {
   color: var(--accent-fg-color);
 }
 
+/* Path picker: folder icons in the accent color, like Rex. */
+.path-picker image.folder {
+  color: var(--accent-color);
+}
+
+.path-picker row:selected image {
+  color: inherit;
+}
+
 /* Independent floating panels, grouped by their owning main tab. */
 .floating-terminal {
   background: var(--window-bg-color);
