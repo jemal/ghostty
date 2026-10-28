@@ -534,6 +534,31 @@ fn keyPressed(_: *gtk.EventControllerKey, keyval: c_uint, _: c_uint, mods: gdk.M
             return 1;
         }
     }
+    // Move the selection. Up, Down, Ctrl+K and Ctrl+J follow the screen.
+    // Ctrl+N and Ctrl+P follow the matches, like a completion menu: Ctrl+N
+    // goes to a worse match, which is up when the card is above the cursor.
+    const step: ?c_int = step: {
+        if (keyval == gdk.KEY_Up) break :step -1;
+        if (keyval == gdk.KEY_Down) break :step 1;
+        if (!mods.control_mask or mods.alt_mask or mods.shift_mask) break :step null;
+        const worse: c_int = if (self.side == .above) -1 else 1;
+        break :step switch (gdk.keyvalToLower(keyval)) {
+            gdk.KEY_k => -1,
+            gdk.KEY_j => 1,
+            gdk.KEY_n => worse,
+            gdk.KEY_p => -worse,
+            else => null,
+        };
+    };
+    if (step) |s| {
+        const current = self.list.getSelectedRow() orelse return 1;
+        const next = self.list.getRowAtIndex(current.getIndex() + s) orelse return 1;
+        if (self.rowIndex(next) >= self.rows.len) return 1;
+        self.list.selectRow(next);
+        self.scrollTo(next);
+        return 1;
+    }
+
     // Ctrl+Tab and Alt+Tab are other keys, for example the next tab.
     const tab = !mods.control_mask and !mods.alt_mask;
     switch (keyval) {
@@ -545,15 +570,6 @@ fn keyPressed(_: *gtk.EventControllerKey, keyval: c_uint, _: c_uint, mods: gdk.M
             self.openFolder(std.fs.path.dirname(self.folder orelse return 1) orelse return 1)
         else if (self.list.getSelectedRow()) |row|
             self.accept(row, true),
-        gdk.KEY_Up, gdk.KEY_Down => {
-            // Up and Down follow the screen, in both orders.
-            const current = self.list.getSelectedRow() orelse return 1;
-            const step: c_int = if (keyval == gdk.KEY_Up) -1 else 1;
-            const next = self.list.getRowAtIndex(current.getIndex() + step) orelse return 1;
-            if (self.rowIndex(next) >= self.rows.len) return 1;
-            self.list.selectRow(next);
-            self.scrollTo(next);
-        },
         else => return 0,
     }
     return 1;
