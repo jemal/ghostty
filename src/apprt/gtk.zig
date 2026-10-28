@@ -23,4 +23,5 @@ test {
     _ = @import("gtk/picker/protocol.zig");
     _ = @import("gtk/picker/placement.zig");
     _ = @import("gtk/picker/path.zig");
+    _ = @import("gtk/picker/recent.zig");
 }

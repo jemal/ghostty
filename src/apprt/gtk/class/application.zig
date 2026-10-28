@@ -49,6 +49,7 @@ const media = @import("../media.zig");
 const Overrides = @import("Overrides.zig");
 const sessions = @import("../session.zig");
 const SessionSave = @import("../session_save.zig");
+const RecentPaths = @import("../picker/recent.zig").Store;
 const lua = @import("../lua.zig");
 
 const log = std.log.scoped(.gtk_ghostty_application);
@@ -172,6 +173,10 @@ pub const Application = extern struct {
 
     const Private = struct {
         picker_service: ?*@import("../picker/service.zig") = null,
+        /// Made on first use; null until then.
+        recent_paths: ?*RecentPaths = null,
+        /// The state folder could not be opened; do not try again.
+        recent_paths_failed: bool = false,
         /// The apprt App. This is annoying that we need this it'd be
         /// nicer to just make THIS the apprt app but the current libghostty
         /// API doesn't allow that.
@@ -470,6 +475,7 @@ pub const Application = extern struct {
     pub fn deinit(self: *Self) void {
         self.stopSessionSaves();
         self.stopPicker();
+        self.stopRecentPaths();
         const alloc = self.allocator();
         const priv: *Private = self.private();
         priv.config.unref();
@@ -499,6 +505,34 @@ pub const Application = extern struct {
 
     pub fn picker(self: *Self) ?*@import("../picker/service.zig") {
         return self.private().picker_service;
+    }
+
+    /// The recent paths of the path picker, or null when
+    /// `path-picker-history` is off or the state folder is not available.
+    pub fn recentPaths(self: *Self) ?*RecentPaths {
+        const priv = self.private();
+        if (!priv.config.get().@"path-picker-history" or priv.recent_paths_failed) return null;
+        if (priv.recent_paths) |store| return store;
+        priv.recent_paths = recent: {
+            const dir = self.stateDir("ghostty/recent-paths") catch |err| {
+                log.warn("unable to open the recent paths folder err={}", .{err});
+                break :recent null;
+            };
+            break :recent RecentPaths.create(self.allocator(), global.io(), dir) catch {
+                dir.close(global.io());
+                break :recent null;
+            };
+        };
+        priv.recent_paths_failed = priv.recent_paths == null;
+        return priv.recent_paths;
+    }
+
+    /// Write the recent paths that are not saved yet. Quitting calls `deinit`,
+    /// not `dispose`, so both call this.
+    fn stopRecentPaths(self: *Self) void {
+        const store = self.private().recent_paths orelse return;
+        self.private().recent_paths = null;
+        store.destroy();
     }
 
     fn stopPicker(self: *Self) void {
@@ -1578,9 +1612,14 @@ pub const Application = extern struct {
     }
 
     pub fn sessionDir(self: *Self) !std.Io.Dir {
+        return self.stateDir("ghostty/sessions");
+    }
+
+    /// A folder for this app ID under `subdir` of the XDG state folder.
+    fn stateDir(self: *Self, subdir: []const u8) !std.Io.Dir {
         var env = try global.environMap();
         defer env.deinit();
-        const base = try internal_os.xdg.state(global.io(), self.allocator(), &env, .{ .subdir = "ghostty/sessions" });
+        const base = try internal_os.xdg.state(global.io(), self.allocator(), &env, .{ .subdir = subdir });
         defer self.allocator().free(base);
         return sessions.open(global.io(), self.allocator(), base, std.mem.span(self.as(gio.Application).getApplicationId() orelse build_config.bundle_id));
     }
@@ -1714,6 +1753,7 @@ pub const Application = extern struct {
     fn dispose(self: *Self) callconv(.c) void {
         self.stopSessionSaves();
         self.stopPicker();
+        self.stopRecentPaths();
         const priv = self.private();
         if (priv.config_errors_dialog.get()) |diag| {
             diag.close();

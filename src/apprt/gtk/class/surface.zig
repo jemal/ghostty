@@ -2445,6 +2445,8 @@ pub const Surface = extern struct {
         if (pwd) |v| priv.pwd = glib.ext.dupeZ(u8, v);
         self.as(gobject.Object).notifyByPspec(properties.pwd.impl.param_spec);
         if (changed) self.emitLuaEvent(.pwd_changed, null);
+        // Ghostty takes OSC 7 only from this machine, so the folder is local.
+        if (changed) if (pwd) |v| if (Application.default().recentPaths()) |recent| recent.add(v, true, .pane);
     }
 
     /// Returns the focus state of this surface.
