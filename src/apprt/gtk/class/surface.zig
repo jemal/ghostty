@@ -31,6 +31,7 @@ const program_icon = @import("../program_icon.zig");
 const Config = @import("config.zig").Config;
 const ResizeOverlay = @import("resize_overlay.zig").ResizeOverlay;
 const SearchOverlay = @import("search_overlay.zig").SearchOverlay;
+const placement = @import("../picker/placement.zig");
 const KeyStateOverlay = @import("key_state_overlay.zig").KeyStateOverlay;
 const ChildExited = @import("surface_child_exited.zig").SurfaceChildExited;
 const ClipboardConfirmationDialog = @import("clipboard_confirmation_dialog.zig").ClipboardConfirmationDialog;
@@ -1652,17 +1653,23 @@ pub const Surface = extern struct {
         return self.private().child_exited;
     }
 
-    /// Capture the visible terminal caret, not the mouse pointer. Render pixels
-    /// include font DPI; GTK coordinates divide only by the surface scale.
+    /// Capture the visible terminal caret, not the mouse pointer.
     pub fn anchorPickerAtCursor(self: *Self, picker: *@import("../picker/list.zig")) void {
+        picker.anchorAt(self.private().terminal_page, self.cursorRect() orelse return);
+    }
+
+    /// The terminal caret in `terminal_page` coordinates, or null when it is
+    /// not on the screen. Render pixels include font DPI; GTK coordinates
+    /// divide only by the surface scale.
+    fn cursorRect(self: *Self) ?placement.Rect {
         const priv = self.private();
-        const core_surface = priv.core_surface orelse return;
+        const core_surface = priv.core_surface orelse return null;
         const point = point: {
             core_surface.renderer_state.mutex.lockUncancelable(global.io());
             defer core_surface.renderer_state.mutex.unlock(global.io());
             const screen = core_surface.renderer_state.terminal.screens.active;
-            const point = screen.pages.pointFromPin(.viewport, screen.cursor.page_pin.*) orelse return;
-            if (point.viewport.y >= core_surface.size.grid().rows) return;
+            const point = screen.pages.pointFromPin(.viewport, screen.cursor.page_pin.*) orelse return null;
+            if (point.viewport.y >= core_surface.size.grid().rows) return null;
             break :point point.viewport;
         };
         const render = priv.render_surface.as(gtk.Widget);
@@ -1671,13 +1678,13 @@ pub const Surface = extern struct {
         const x: f32 = @floatCast(@as(f64, @floatFromInt(point.x * size.cell.width + size.padding.left)) / scale);
         const y: f32 = @floatCast(@as(f64, @floatFromInt(point.y * size.cell.height + size.padding.top)) / scale);
         var origin: @import("graphene").Point = undefined;
-        if (render.computePoint(priv.terminal_page.as(gtk.Widget), &.{ .f_x = x, .f_y = y }, &origin) == 0) return;
-        picker.anchorAt(priv.terminal_page, .{
+        if (render.computePoint(priv.terminal_page.as(gtk.Widget), &.{ .f_x = x, .f_y = y }, &origin) == 0) return null;
+        return .{
             .x = @intFromFloat(@floor(origin.f_x)),
             .y = @intFromFloat(@floor(origin.f_y)),
             .width = @intFromFloat(@ceil(@as(f64, @floatFromInt(size.cell.width)) / scale)),
             .height = @intFromFloat(@ceil(@as(f64, @floatFromInt(size.cell.height)) / scale)),
-        });
+        };
     }
 
     pub fn showPicker(self: *Self, widget: *gtk.Widget) void {

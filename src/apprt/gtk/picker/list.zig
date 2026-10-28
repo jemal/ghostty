@@ -147,30 +147,36 @@ pub fn anchorAt(self: *Self, overlay: *gtk.Overlay, rect: placement.Rect) void {
 
 fn position(overlay: *gtk.Overlay, widget: *gtk.Widget, allocation: *gdk.Rectangle, self: *Self) callconv(.c) c_int {
     if (widget != self.frame.as(gtk.Widget)) return 0;
+    allocation.* = placeCard(overlay, widget, self.search, self.anchor.?, &self.input_offset, 96, null);
+    return 1;
+}
+
+/// Place a card at the terminal cursor in the pane, so that its search text
+/// starts at the cursor. `input_offset` is measured on the first call and kept.
+pub fn placeCard(overlay: *gtk.Overlay, card: *gtk.Widget, search: *gtk.SearchEntry, anchor: placement.Rect, input_offset: *?i32, minimum_height: c_int, side: ?placement.Side) gdk.Rectangle {
     const pane = overlay.as(gtk.Widget);
     const width = @max(1, @min(360, pane.getWidth() - 32));
     var minimum: c_int = 0;
     var natural: c_int = 0;
-    widget.measure(.vertical, width, &minimum, &natural, null, null);
-    if (self.input_offset == null) {
+    card.measure(.vertical, width, &minimum, &natural, null, null);
+    if (input_offset.* == null) {
         // The overlay asks for position before allocating this child. Lay out
         // its contents at the requested width first, then measure the actual
         // GtkText insertion point, including the icon, CSS padding and border.
         // GTK applies the final translated allocation after this callback.
-        widget.allocate(width, natural, -1, null);
-        if (self.search.as(gtk.Editable).getDelegate()) |delegate| {
+        card.allocate(width, natural, -1, null);
+        if (search.as(gtk.Editable).getDelegate()) |delegate| {
             if (gobject.ext.cast(gtk.Text, delegate)) |text| {
                 var caret: @import("graphene").Rect = undefined;
                 text.computeCursorExtents(0, &caret, null);
                 var origin: @import("graphene").Point = undefined;
-                if (text.as(gtk.Widget).computePoint(widget, &caret.f_origin, &origin) != 0)
-                    self.input_offset = @intFromFloat(@round(origin.f_x));
+                if (text.as(gtk.Widget).computePoint(card, &caret.f_origin, &origin) != 0)
+                    input_offset.* = @intFromFloat(@round(origin.f_x));
             }
         }
     }
-    const rect = placement.place(pane.getWidth(), pane.getHeight(), self.anchor.?, self.input_offset orelse 0, natural, @max(minimum, 96));
-    allocation.* = .{ .f_x = rect.x, .f_y = rect.y, .f_width = rect.width, .f_height = rect.height };
-    return 1;
+    const rect = placement.place(pane.getWidth(), pane.getHeight(), anchor, input_offset.* orelse 0, natural, @max(minimum, minimum_height), side);
+    return .{ .f_x = rect.x, .f_y = rect.y, .f_width = rect.width, .f_height = rect.height };
 }
 
 pub fn deinit(self: *Self) void {
